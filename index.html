@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v20</title>
+<title>HEM-7271T 血圧フォト記録 v21</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -36,11 +36,9 @@ label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
 .stat{padding:11px;background:#f9fafb;border:1px solid var(--line);border-radius:13px}.stat b{font-size:19px;display:block}.stat span{font-size:11px;color:var(--muted)}
 table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1px solid var(--line);font-size:13px;text-align:left}th{color:var(--muted)}
 svg{width:100%;height:230px;display:block}
-#presetStage{display:none}
-.zoomCalib{margin-top:12px;border:1px solid var(--line);border-radius:16px;padding:10px;background:#fafafa}
-.zoomCalib b{display:block;margin-bottom:7px}
-.zoomStage{position:relative;touch-action:none;user-select:none;overflow:hidden;border-radius:12px}
-.zoomCanvas{display:block;width:100%;height:auto;background:#eee;border-radius:12px}
+#presetStage{position:relative;display:none;margin-top:12px;touch-action:none;user-select:none;overflow:hidden;border:1px solid var(--line);border-radius:16px;background:#fafafa;padding:10px}
+#presetCanvas{display:block;width:100%;height:auto;background:#eee;border-radius:12px}
+.presetHint{font-size:13px;color:var(--muted);line-height:1.5;margin-top:8px}
 .presetBox{position:absolute;border:2px solid #2563eb;background:#2563eb18;border-radius:8px;touch-action:none}
 .presetBox span{position:absolute;left:2px;top:2px;background:#2563eb;color:#fff;border-radius:5px;padding:2px 5px;font-size:10px;font-weight:700}
 .presetBox.selected{border-color:#dc2626;background:#dc262618}
@@ -50,8 +48,8 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v20</h1>
-<div class="sub">3段ズーム校正 + 保存枠を優先した認識</div>
+<h1>HEM-7271T 血圧フォト記録 v21</h1>
+<div class="sub">LCD全体1枚で7桁を直接校正</div>
 
 <div class="card">
  <div class="row">
@@ -68,18 +66,16 @@ svg{width:100%;height:230px;display:block}
   <div class="handle" data-i="0"></div><div class="handle" data-i="1"></div>
   <div class="handle" data-i="2"></div><div class="handle" data-i="3"></div>
  </div>
- <div class="notice">4つの丸をLCD面の四隅へ合わせてください。V20ではLCD四隅補正後、SYS・DIA・PULSEを縦方向にも大きく表示して校正できます。</div>
+ <div class="notice">4つの丸をLCD面の四隅へ合わせてください。V21では補正後のLCD全体を1枚で表示し、その上で7個の青枠を直接調整します。</div>
 </div>
 
 <div class="card">
  <strong>HEM-7271T 桁位置プリセット</strong>
- <div class="sub">最初の1回だけ、SYS・DIA・PULSEを上下余白まで含めて大きく表示し、数字全体が入るよう青枠を合わせます。青枠は移動でき、右下の赤丸で大きさも変更できます。保存後は次回から自動で呼び出します。</div>
- <div id="presetStage"></div>
- <div id="zoomCalibs" style="display:none">
-  <div class="zoomCalib"><b>SYS 3桁</b><div id="zoomSys" class="zoomStage"><canvas id="zoomSysCanvas" class="zoomCanvas" width="900" height="300"></canvas></div></div>
-  <div class="zoomCalib"><b>DIA 2桁</b><div id="zoomDia" class="zoomStage"><canvas id="zoomDiaCanvas" class="zoomCanvas" width="900" height="300"></canvas></div></div>
-  <div class="zoomCalib"><b>PULSE 2桁</b><div id="zoomPulse" class="zoomStage"><canvas id="zoomPulseCanvas" class="zoomCanvas" width="900" height="300"></canvas></div></div>
+ <div class="sub">ズーム切り出しは使いません。補正後のLCD全体を少し引いた1枚の画像で表示し、その上にSYS3桁・DIA2桁・PULSE2桁の7個の青枠を直接置きます。</div>
+ <div id="presetStage">
+   <canvas id="presetCanvas" width="900" height="700"></canvas>
  </div>
+ <div class="presetHint">青枠はドラッグで移動、右下の赤丸で縦横に拡大縮小できます。数字1個の上下左右が切れず、少し余白まで入る大きさにしてください。</div>
  <div class="row" style="margin-top:10px">
   <button id="readBtn" disabled>HEM-7271T専用解析</button>
   <button id="savePresetBtn" class="secondary" disabled>桁位置を保存</button>
@@ -135,19 +131,13 @@ const pc=$("photoCanvas"),pctx=pc.getContext("2d",{willReadFrequently:true});
 const rc=$("rectified"),rctx=rc.getContext("2d",{willReadFrequently:true});
 const handles=[...document.querySelectorAll(".handle")];
 
-const CALIB_ROWS={
- sys:{x:.10,y:.12,w:.58,h:.40},
- dia:{x:.25,y:.36,w:.43,h:.40},
- pulse:{x:.34,y:.61,w:.35,h:.31}
-};
-
 const PAT={
  0:[1,1,1,1,1,1,0],1:[0,1,1,0,0,0,0],2:[1,1,0,1,1,0,1],3:[1,1,1,1,0,0,1],
  4:[0,1,1,0,0,1,1],5:[1,0,1,1,0,1,1],6:[1,0,1,1,1,1,1],7:[1,1,1,0,0,0,0],
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
 };
 
-const PRESET_KEY="bp_hem7271t_digit_preset_v20";
+const PRESET_KEY="bp_hem7271t_digit_preset_v21";
 const DEFAULT_DIGIT_BOXES={
  sys:[
   {id:"s1",label:"SYS1",x:.17,y:.18,w:.12,h:.31},
@@ -167,34 +157,12 @@ let DIGIT_BOXES=structuredClone(DEFAULT_DIGIT_BOXES);
 
 
 
-function rowDef(group){
- return (typeof CALIB_ROWS!=="undefined" ? CALIB_ROWS[group] :
-         typeof ROW_VIEWS!=="undefined" ? ROW_VIEWS[group] : null);
-}
-
-function globalToRowBox(b,group){
- const r=rowDef(group);
- return {
-   ...b,
-   rx:(b.x-r.x)/r.w,
-   ry:(b.y-r.y)/r.h,
-   rw:b.w/r.w,
-   rh:b.h/r.h
- };
-}
-
-function rowToGlobalBox(rb,group){
- const r=rowDef(group);
- rb.x=r.x+rb.rx*r.w;
- rb.y=r.y+rb.ry*r.h;
- rb.w=rb.rw*r.w;
- rb.h=rb.rh*r.h;
-}
-
 function loadPreset(){
  try{
    DIGIT_BOXES=JSON.parse(localStorage.getItem(PRESET_KEY)||"null")||structuredClone(DEFAULT_DIGIT_BOXES);
- }catch{DIGIT_BOXES=structuredClone(DEFAULT_DIGIT_BOXES)}
+ }catch{
+   DIGIT_BOXES=structuredClone(DEFAULT_DIGIT_BOXES);
+ }
 }
 function flatPreset(){
  return [
@@ -210,159 +178,115 @@ function syncPreset(flat){
   pulse:flat.filter(b=>b.group==="pulse").map(({group,...r})=>r)
  };
 }
-const ZOOM_REGIONS={
- sys:{x:.10,y:.12,w:.60,h:.40,stage:"zoomSys",canvas:"zoomSysCanvas"},
- dia:{x:.25,y:.38,w:.42,h:.37,stage:"zoomDia",canvas:"zoomDiaCanvas"},
- pulse:{x:.33,y:.64,w:.37,h:.29,stage:"zoomPulse",canvas:"zoomPulseCanvas"}
-};
 
+// V21: calibration is done on the SAME full rectified LCD image
+// and the SAME normalized coordinates used later by cropFixedDigit().
 function buildPresetOverlay(){
- $("zoomCalibs").style.display="block";
+ const stage=$("presetStage");
+ const canvas=$("presetCanvas");
+ const ctx=canvas.getContext("2d");
+
+ canvas.width=rc.width;
+ canvas.height=rc.height;
+ ctx.clearRect(0,0,canvas.width,canvas.height);
+ ctx.drawImage(rc,0,0,canvas.width,canvas.height);
+ stage.style.display="block";
+
+ [...stage.querySelectorAll(".presetBox")].forEach(x=>x.remove());
  const flat=flatPreset();
- for(const group of ["sys","dia","pulse"]){
-   const reg=ZOOM_REGIONS[group],stage=$(reg.stage),canvas=$(reg.canvas),ctx=canvas.getContext("2d");
-   ctx.clearRect(0,0,canvas.width,canvas.height);
-   ctx.drawImage(rc,reg.x*rc.width,reg.y*rc.height,reg.w*rc.width,reg.h*rc.height,0,0,canvas.width,canvas.height);
-   [...stage.querySelectorAll(".presetBox")].forEach(x=>x.remove());
-   flat.forEach((b,i)=>{
-     if(b.group!==group)return;
-     const d=document.createElement("div");d.className="presetBox";d.dataset.i=i;
-     const s=document.createElement("span");s.textContent=b.label;d.appendChild(s);
-     const rh=document.createElement("div");rh.className="resizeHandle";d.appendChild(rh);
-     stage.appendChild(d);
 
-     d.onpointerdown=e=>{
-       if(e.target===rh)return;
-       e.preventDefault();d.setPointerCapture(e.pointerId);
-       [...document.querySelectorAll(".presetBox")].forEach(x=>x.classList.remove("selected"));d.classList.add("selected");
-       const r=canvas.getBoundingClientRect(),sx=e.clientX,sy=e.clientY,start={x:b.x,y:b.y};
-       d.onpointermove=ev=>{
-         b.x=Math.max(reg.x,Math.min(reg.x+reg.w-b.w,start.x+(ev.clientX-sx)/r.width*reg.w));
-         b.y=Math.max(reg.y,Math.min(reg.y+reg.h-b.h,start.y+(ev.clientY-sy)/r.height*reg.h));
-         positionPreset(flat);
-       };
-       d.onpointerup=()=>{d.onpointermove=null;syncPreset(flat)};
-     };
+ flat.forEach((b,i)=>{
+   const d=document.createElement("div");
+   d.className="presetBox";
+   d.dataset.i=i;
 
-     rh.onpointerdown=e=>{
-       e.preventDefault();e.stopPropagation();rh.setPointerCapture(e.pointerId);
-       [...document.querySelectorAll(".presetBox")].forEach(x=>x.classList.remove("selected"));d.classList.add("selected");
-       const r=canvas.getBoundingClientRect(),sx=e.clientX,sy=e.clientY,start={w:b.w,h:b.h};
-       rh.onpointermove=ev=>{
-         const nw=start.w+(ev.clientX-sx)/r.width*reg.w;
-         const nh=start.h+(ev.clientY-sy)/r.height*reg.h;
-         b.w=Math.max(.06,Math.min(.28,Math.min(reg.x+reg.w-b.x,nw)));
-         b.h=Math.max(.10,Math.min(.42,Math.min(reg.y+reg.h-b.y,nh)));
-         positionPreset(flat);
-       };
-       rh.onpointerup=()=>{rh.onpointermove=null;syncPreset(flat)};
+   const label=document.createElement("span");
+   label.textContent=b.label;
+   d.appendChild(label);
+
+   const resize=document.createElement("div");
+   resize.className="resizeHandle";
+   d.appendChild(resize);
+
+   stage.appendChild(d);
+
+   // Move
+   d.onpointerdown=e=>{
+     if(e.target===resize)return;
+     e.preventDefault();
+     d.setPointerCapture(e.pointerId);
+     [...stage.querySelectorAll(".presetBox")].forEach(x=>x.classList.remove("selected"));
+     d.classList.add("selected");
+
+     const cr=canvas.getBoundingClientRect();
+     const sx=e.clientX,sy=e.clientY,startX=b.x,startY=b.y;
+
+     d.onpointermove=ev=>{
+       b.x=Math.max(0,Math.min(1-b.w,startX+(ev.clientX-sx)/cr.width));
+       b.y=Math.max(0,Math.min(1-b.h,startY+(ev.clientY-sy)/cr.height));
+       positionPreset(flat);
      };
-   });
- }
+     d.onpointerup=()=>{
+       d.onpointermove=null;
+       syncPreset(flat);
+     };
+   };
+
+   // Resize from bottom-right. No zoom-region constraint.
+   resize.onpointerdown=e=>{
+     e.preventDefault();
+     e.stopPropagation();
+     resize.setPointerCapture(e.pointerId);
+     [...stage.querySelectorAll(".presetBox")].forEach(x=>x.classList.remove("selected"));
+     d.classList.add("selected");
+
+     const cr=canvas.getBoundingClientRect();
+     const sx=e.clientX,sy=e.clientY,startW=b.w,startH=b.h;
+
+     resize.onpointermove=ev=>{
+       const nw=startW+(ev.clientX-sx)/cr.width;
+       const nh=startH+(ev.clientY-sy)/cr.height;
+       b.w=Math.max(.045,Math.min(1-b.x,nw));
+       b.h=Math.max(.075,Math.min(1-b.y,nh));
+       positionPreset(flat);
+     };
+     resize.onpointerup=()=>{
+       resize.onpointermove=null;
+       syncPreset(flat);
+     };
+   };
+ });
+
  positionPreset(flat);
 }
 
 function positionPreset(flat=flatPreset()){
- for(const group of ["sys","dia","pulse"]){
-   const reg=ZOOM_REGIONS[group],canvas=$(reg.canvas),stage=$(reg.stage),r=canvas.getBoundingClientRect();
-   [...stage.querySelectorAll(".presetBox")].forEach(d=>{
-     const b=flat[Number(d.dataset.i)];
-     d.style.left=((b.x-reg.x)/reg.w*r.width)+"px";
-     d.style.top=((b.y-reg.y)/reg.h*r.height)+"px";
-     d.style.width=(b.w/reg.w*r.width)+"px";
-     d.style.height=(b.h/reg.h*r.height)+"px";
-   });
- }
+ const stage=$("presetStage"),canvas=$("presetCanvas");
+ if(!stage || stage.style.display==="none")return;
+ const cr=canvas.getBoundingClientRect();
+ const sr=stage.getBoundingClientRect();
+ const ox=cr.left-sr.left;
+ const oy=cr.top-sr.top;
+
+ [...stage.querySelectorAll(".presetBox")].forEach(d=>{
+   const b=flat[Number(d.dataset.i)];
+   d.style.left=(ox+b.x*cr.width)+"px";
+   d.style.top=(oy+b.y*cr.height)+"px";
+   d.style.width=(b.w*cr.width)+"px";
+   d.style.height=(b.h*cr.height)+"px";
+ });
 }
 window.addEventListener("resize",()=>positionPreset());
+
 $("savePresetBtn").onclick=()=>{
  localStorage.setItem(PRESET_KEY,JSON.stringify(DIGIT_BOXES));
- $("status").textContent="桁位置プリセットを保存しました。次回から自動で使います。";
+ $("status").textContent="V21桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
 };
 $("resetPresetBtn").onclick=()=>{
  DIGIT_BOXES=structuredClone(DEFAULT_DIGIT_BOXES);
  buildPresetOverlay();
- $("status").textContent="桁位置を初期値へ戻しました。";
+ $("status").textContent="桁位置をV21初期値へ戻しました。";
 };
-
-function buildCalibrationRows(){
- const groups=["sys","dia","pulse"];
- groups.forEach(group=>{
-   const r=rowDef(group);
-   const canvas=$(group==="sys"?"calSys":group==="dia"?"calDia":"calPulse");
-   if(!canvas)return;
-   const stage=canvas.parentElement;
-   const ctx=canvas.getContext("2d");
-   canvas.width=Math.max(500,Math.round(rc.width*r.w));
-   canvas.height=Math.max(360,Math.round(rc.height*r.h));
-   ctx.clearRect(0,0,canvas.width,canvas.height);
-   ctx.drawImage(
-     rc,
-     r.x*rc.width,r.y*rc.height,r.w*rc.width,r.h*rc.height,
-     0,0,canvas.width,canvas.height
-   );
-
-   [...stage.querySelectorAll(".presetBox")].forEach(x=>x.remove());
-
-   DIGIT_BOXES[group].forEach((b,i)=>{
-     const rb=globalToRowBox(b,group);
-     const d=document.createElement("div");
-     d.className="presetBox";
-     d.dataset.group=group;
-     d.dataset.i=i;
-
-     const s=document.createElement("span");
-     s.textContent=b.label;
-     d.appendChild(s);
-
-     const rh=document.createElement("div");
-     rh.className="resizeHandle";
-     d.appendChild(rh);
-     stage.appendChild(d);
-
-     const position=()=>{
-       const cr=canvas.getBoundingClientRect();
-       d.style.left=(rb.rx*cr.width)+"px";
-       d.style.top=(rb.ry*cr.height)+"px";
-       d.style.width=(rb.rw*cr.width)+"px";
-       d.style.height=(rb.rh*cr.height)+"px";
-     };
-
-     d.onpointerdown=e=>{
-       if(e.target===rh)return;
-       e.preventDefault(); d.setPointerCapture(e.pointerId);
-       const cr=canvas.getBoundingClientRect(),sx=e.clientX,sy=e.clientY,start={x:rb.rx,y:rb.ry};
-       d.onpointermove=ev=>{
-         rb.rx=Math.max(0,Math.min(1-rb.rw,start.x+(ev.clientX-sx)/cr.width));
-         rb.ry=Math.max(0,Math.min(1-rb.rh,start.y+(ev.clientY-sy)/cr.height));
-         position();
-       };
-       d.onpointerup=()=>{
-         d.onpointermove=null;
-         rowToGlobalBox(rb,group);
-         Object.assign(b,{x:rb.x,y:rb.y,w:rb.w,h:rb.h});
-       };
-     };
-
-     rh.onpointerdown=e=>{
-       e.preventDefault(); e.stopPropagation(); rh.setPointerCapture(e.pointerId);
-       const cr=canvas.getBoundingClientRect(),sx=e.clientX,sy=e.clientY,start={w:rb.rw,h:rb.rh};
-       rh.onpointermove=ev=>{
-         rb.rw=Math.max(.08,Math.min(1-rb.rx,start.w+(ev.clientX-sx)/cr.width));
-         rb.rh=Math.max(.12,Math.min(1-rb.ry,start.h+(ev.clientY-sy)/cr.height));
-         position();
-       };
-       rh.onpointerup=()=>{
-         rh.onpointermove=null;
-         rowToGlobalBox(rb,group);
-         Object.assign(b,{x:rb.x,y:rb.y,w:rb.w,h:rb.h});
-       };
-     };
-
-     position();
-   });
- });
-}
 
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
 
@@ -419,7 +343,7 @@ function rectify(){
  rctx.putImageData(dst,0,0);rc.style.display="block";
  loadPreset(); buildPresetOverlay();
  ["readBtn","savePresetBtn","resetPresetBtn"].forEach(id=>$(id).disabled=false);
- $("status").textContent="SYS・DIA・PULSEを大きく表示しました。青枠に数字1個が丸ごと入るよう調整して保存してください。";
+ $("status").textContent="LCD全体を1枚で表示しました。7個の青枠に各数字1個が丸ごと入るよう調整して保存してください。";
 }
 $("rectifyBtn").onclick=rectify;
 
@@ -477,10 +401,10 @@ function refineDigitCrop(c){
  const ctx=out.getContext("2d");
  ctx.fillStyle="#fff";ctx.fillRect(0,0,out.width,out.height);
 
- // V20: saved preset is authoritative. Only keep a tiny inner margin.
+ // V19: saved preset is authoritative. Only keep a tiny inner margin.
  const mx=Math.round(c.width*.02), my=Math.round(c.height*.02);
  ctx.drawImage(c,mx,my,Math.max(1,c.width-2*mx),Math.max(1,c.height-2*my),0,0,out.width,out.height);
- return {canvas:out,refine:{x1:mx,y1:my,x2:c.width-mx,y2:c.height-my,mode:"preset-v20"}};
+ return {canvas:out,refine:{x1:mx,y1:my,x2:c.width-mx,y2:c.height-my,mode:"preset-v21-full-lcd"}};
 }
 
 function meanRegion(diff,w,h,rect){
