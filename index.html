@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v19</title>
+<title>HEM-7271T 血圧フォト記録 v20</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -50,7 +50,7 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v19</h1>
+<h1>HEM-7271T 血圧フォト記録 v20</h1>
 <div class="sub">3段ズーム校正 + 保存枠を優先した認識</div>
 
 <div class="card">
@@ -68,7 +68,7 @@ svg{width:100%;height:230px;display:block}
   <div class="handle" data-i="0"></div><div class="handle" data-i="1"></div>
   <div class="handle" data-i="2"></div><div class="handle" data-i="3"></div>
  </div>
- <div class="notice">4つの丸をLCD面の四隅へ合わせてください。V19ではLCD四隅補正後、SYS・DIA・PULSEを縦方向にも大きく表示して校正できます。</div>
+ <div class="notice">4つの丸をLCD面の四隅へ合わせてください。V20ではLCD四隅補正後、SYS・DIA・PULSEを縦方向にも大きく表示して校正できます。</div>
 </div>
 
 <div class="card">
@@ -147,7 +147,7 @@ const PAT={
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
 };
 
-const PRESET_KEY="bp_hem7271t_digit_preset_v19";
+const PRESET_KEY="bp_hem7271t_digit_preset_v20";
 const DEFAULT_DIGIT_BOXES={
  sys:[
   {id:"s1",label:"SYS1",x:.17,y:.18,w:.12,h:.31},
@@ -477,10 +477,10 @@ function refineDigitCrop(c){
  const ctx=out.getContext("2d");
  ctx.fillStyle="#fff";ctx.fillRect(0,0,out.width,out.height);
 
- // V19: saved preset is authoritative. Only keep a tiny inner margin.
+ // V20: saved preset is authoritative. Only keep a tiny inner margin.
  const mx=Math.round(c.width*.02), my=Math.round(c.height*.02);
  ctx.drawImage(c,mx,my,Math.max(1,c.width-2*mx),Math.max(1,c.height-2*my),0,0,out.width,out.height);
- return {canvas:out,refine:{x1:mx,y1:my,x2:c.width-mx,y2:c.height-my,mode:"preset-v19"}};
+ return {canvas:out,refine:{x1:mx,y1:my,x2:c.width-mx,y2:c.height-my,mode:"preset-v20"}};
 }
 
 function meanRegion(diff,w,h,rect){
