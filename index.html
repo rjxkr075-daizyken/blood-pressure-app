@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v7</title>
+<title>HEM-7271T 血圧フォト記録 v8</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -36,17 +36,17 @@ label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
 svg{width:100%;height:230px;display:block}
 table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1px solid var(--line);font-size:13px;text-align:left}th{color:var(--muted)}
 .calib{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
-.debuggrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
-.debugbox{border:1px solid var(--line);border-radius:12px;padding:8px;background:#fafafa}
-.debugbox canvas{width:100%;height:120px;object-fit:contain;background:#fff;border-radius:8px}
-.debugbox b{font-size:12px}
-@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}.calib,.debuggrid{grid-template-columns:1fr}}
+.learnbox{background:#f9fafb;border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:12px}
+.learnstats{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chip{padding:5px 8px;border-radius:999px;background:#e5e7eb;font-size:12px}
+.chip.ok{background:#dcfce7}
+@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}.calib{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v7</h1>
-<div class="sub">数字形状の自動抽出 + 正規化 + テンプレート照合</div>
+<h1>HEM-7271T 血圧フォト記録 v8</h1>
+<div class="sub">実機学習対応：あなたの血圧計の数字を覚える</div>
 
 <div class="card">
  <div class="row">
@@ -60,19 +60,20 @@ table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1p
   <div class="handle" data-i="0"></div><div class="handle" data-i="1"></div>
   <div class="handle" data-i="2"></div><div class="handle" data-i="3"></div>
  </div>
- <div class="notice">4つの丸をLCD面の四隅に合わせてから「液晶を補正」を押してください。</div>
+ <div class="notice">4つの丸をLCD面の四隅へ合わせてから「液晶を補正」を押してください。</div>
 </div>
 
 <div class="card">
  <strong>数字枠の位置合わせ</strong>
- <div class="sub">青い枠を各数字に重ねます。V7では枠内から数字本体を自動的に切り詰めます。</div>
+ <div class="sub">青い枠を各数字に重ねます。保存済みの枠位置は自動で呼び出します。</div>
  <div id="rectStage" style="display:none"><canvas id="rectified" width="900" height="700"></canvas></div>
  <div class="calib">
-  <button id="readBtn" disabled>形で読み取る</button>
+  <button id="readBtn" disabled>読み取る</button>
   <button id="saveCalibBtn" class="secondary" disabled>枠位置を保存</button>
-  <button id="loadCalibBtn" class="secondary" disabled>保存位置を呼び出す</button>
   <button id="resetBoxesBtn" class="secondary" disabled>枠を初期位置へ</button>
+  <button id="clearLearnBtn" class="danger" disabled>学習データ削除</button>
  </div>
+
  <div id="status" class="status" style="padding-top:10px">写真を選択してください。</div>
 
  <div id="results" class="results" style="display:none">
@@ -81,10 +82,11 @@ table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1p
   <div class="result"><span>脈拍</span><b id="rPulse">—</b></div>
  </div>
 
- <div id="debug" class="debuggrid" style="display:none">
-   <div class="debugbox"><b>SYS 正規化像</b><canvas id="dbgSys"></canvas></div>
-   <div class="debugbox"><b>DIA 正規化像</b><canvas id="dbgDia"></canvas></div>
-   <div class="debugbox"><b>PULSE 正規化像</b><canvas id="dbgPulse"></canvas></div>
+ <div class="learnbox">
+  <strong>実機学習</strong>
+  <div class="sub">写真を見て正しい「上・下・脈拍」を手入力してから、「この写真から学習」を押します。</div>
+  <button id="learnBtn" class="secondary" disabled>この写真から学習</button>
+  <div id="learnStats" class="learnstats"></div>
  </div>
 </div>
 
@@ -113,10 +115,10 @@ table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1p
 
 <script>
 const $=id=>document.getElementById(id);
-const KEY="bp_hem7271t_v7", CALKEY="bp_hem7271t_digitboxes_v7";
+const KEY="bp_hem7271t_v8", CALKEY="bp_hem7271t_digitboxes_v8", LEARNKEY="bp_hem7271t_learned_v8";
 $("date").value=new Date().toISOString().slice(0,10);
 
-let src=null,pts=[],boxes=[];
+let src=null,pts=[],boxes=[],currentExtracts=[];
 const pc=$("photoCanvas"),pctx=pc.getContext("2d",{willReadFrequently:true}),stage=$("stage");
 const rc=$("rectified"),rctx=rc.getContext("2d",{willReadFrequently:true}),rectStage=$("rectStage");
 const handles=[...document.querySelectorAll(".handle")];
@@ -131,14 +133,17 @@ const DEFAULT_BOXES=[
  {id:"p2",label:"P2",group:"pulse",x:.61,y:.69,w:.11,h:.18}
 ];
 
-const SEG_FOR_DIGIT = {
-  0:[1,1,1,1,1,1,0], 1:[0,1,1,0,0,0,0], 2:[1,1,0,1,1,0,1],
-  3:[1,1,1,1,0,0,1], 4:[0,1,1,0,0,1,1], 5:[1,0,1,1,0,1,1],
-  6:[1,0,1,1,1,1,1], 7:[1,1,1,0,0,0,0], 8:[1,1,1,1,1,1,1],
-  9:[1,1,1,1,0,1,1]
-};
-
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
+function loadLearned(){try{return JSON.parse(localStorage.getItem(LEARNKEY)||"{}")}catch{return{}}}
+function saveLearned(x){localStorage.setItem(LEARNKEY,JSON.stringify(x));renderLearnStats()}
+function renderLearnStats(){
+ const d=loadLearned();
+ $("learnStats").innerHTML=Array.from({length:10},(_,n)=>{
+   const c=(d[n]||[]).length;
+   return `<span class="chip ${c?"ok":""}">${n}: ${c}枚</span>`;
+ }).join("");
+}
+renderLearnStats();
 
 $("photo").onchange=async e=>{
  const f=e.target.files?.[0];if(!f)return;
@@ -189,10 +194,10 @@ function rectify(){
   }
  }
  rctx.putImageData(dst,0,0);rectStage.style.display="block";
- if(!boxes.length)boxes=structuredClone(DEFAULT_BOXES);
+ try{boxes=JSON.parse(localStorage.getItem(CALKEY)||"null")||structuredClone(DEFAULT_BOXES)}catch{boxes=structuredClone(DEFAULT_BOXES)}
  makeBoxes();positionBoxes();
- ["readBtn","saveCalibBtn","loadCalibBtn","resetBoxesBtn"].forEach(id=>$(id).disabled=false);
- $("status").textContent="青い枠を各数字に合わせてください。枠内の数字本体は自動抽出します。";
+ ["readBtn","saveCalibBtn","resetBoxesBtn","learnBtn","clearLearnBtn"].forEach(id=>$(id).disabled=false);
+ $("status").textContent="青い枠を各数字に合わせてください。";
 }
 $("rectifyBtn").onclick=rectify;
 
@@ -224,154 +229,121 @@ function positionBoxes(){
  });
 }
 $("saveCalibBtn").onclick=()=>{localStorage.setItem(CALKEY,JSON.stringify(boxes));$("status").textContent="数字枠の位置を保存しました。"};
-$("loadCalibBtn").onclick=()=>{const v=JSON.parse(localStorage.getItem(CALKEY)||"null");if(v){boxes=v;makeBoxes();positionBoxes();$("status").textContent="保存した数字枠を呼び出しました。"}else $("status").textContent="保存済みの枠位置はありません。";};
 $("resetBoxesBtn").onclick=()=>{boxes=structuredClone(DEFAULT_BOXES);makeBoxes();positionBoxes();$("status").textContent="初期位置へ戻しました。";};
-
-// --- V7 shape pipeline ---
+$("clearLearnBtn").onclick=()=>{if(confirm("実機学習データをすべて削除しますか？")){localStorage.removeItem(LEARNKEY);renderLearnStats();$("status").textContent="学習データを削除しました。";}};
 
 function extractDigit(box){
  const x=Math.round(box.x*rc.width),y=Math.round(box.y*rc.height),w=Math.round(box.w*rc.width),h=Math.round(box.h*rc.height);
  const img=rctx.getImageData(x,y,w,h);
- const gray=new Float32Array(w*h);
- let vals=[];
+ const gray=new Float32Array(w*h);let vals=[];
  for(let j=0;j<h;j++)for(let i=0;i<w;i++){
   const k=(j*w+i)*4,g=.299*img.data[k]+.587*img.data[k+1]+.114*img.data[k+2];
   gray[j*w+i]=g;vals.push(g);
  }
- vals.sort((a,b)=>a-b);
- const q=p=>vals[Math.min(vals.length-1,Math.floor(vals.length*p))];
- // Adaptive threshold: LCD segments are among the darker pixels.
- let thr=(q(.18)+q(.55))/2;
+ vals.sort((a,b)=>a-b);const q=p=>vals[Math.min(vals.length-1,Math.floor(vals.length*p))];
+ const thr=(q(.15)+q(.55))/2;
  let mask=new Uint8Array(w*h);
  for(let i=0;i<mask.length;i++)mask[i]=gray[i]<thr?1:0;
 
- // Remove border/noise: count dark pixels by row/column, retain dense central component region.
  const col=new Int32Array(w),row=new Int32Array(h);
  for(let yy=0;yy<h;yy++)for(let xx=0;xx<w;xx++)if(mask[yy*w+xx]){col[xx]++;row[yy]++}
  let xs=[],ys=[];
- for(let xx=0;xx<w;xx++)if(col[xx] >= Math.max(2,h*.045))xs.push(xx);
- for(let yy=0;yy<h;yy++)if(row[yy] >= Math.max(2,w*.045))ys.push(yy);
-
+ for(let xx=0;xx<w;xx++)if(col[xx]>=Math.max(2,h*.035))xs.push(xx);
+ for(let yy=0;yy<h;yy++)if(row[yy]>=Math.max(2,w*.035))ys.push(yy);
  if(!xs.length||!ys.length)return null;
+
  let minx=Math.max(0,Math.min(...xs)-2),maxx=Math.min(w-1,Math.max(...xs)+2);
  let miny=Math.max(0,Math.min(...ys)-2),maxy=Math.min(h-1,Math.max(...ys)+2);
+ if((maxx-minx+1)>.95*w){minx=Math.round(.05*w);maxx=Math.round(.95*w)}
+ if((maxy-miny+1)>.95*h){miny=Math.round(.03*h);maxy=Math.round(.97*h)}
 
- // Guard against the entire box being selected due to LCD background.
- if((maxx-minx+1)>.95*w){minx=Math.round(.08*w);maxx=Math.round(.92*w)}
- if((maxy-miny+1)>.95*h){miny=Math.round(.05*h);maxy=Math.round(.95*h)}
-
- const cw=maxx-minx+1,ch=maxy-miny+1;
- const OUTW=90,OUTH=150;
- const out=new Uint8Array(OUTW*OUTH);
+ const cw=maxx-minx+1,ch=maxy-miny+1,OUTW=60,OUTH=100,out=new Uint8Array(OUTW*OUTH);
  for(let oy=0;oy<OUTH;oy++)for(let ox=0;ox<OUTW;ox++){
   const sx=minx+Math.floor(ox*cw/OUTW),sy=miny+Math.floor(oy*ch/OUTH);
   out[oy*OUTW+ox]=mask[sy*w+sx];
  }
- return {mask:out,w:OUTW,h:OUTH,thr,bbox:[minx,miny,maxx,maxy]};
+ return {mask:Array.from(out),w:OUTW,h:OUTH};
 }
 
-function drawSegTemplate(n){
- const W=90,H=150,m=new Uint8Array(W*H);
- const seg=SEG_FOR_DIGIT[n];
- function fillRect(x1,y1,x2,y2){
-  for(let y=Math.floor(y1*H);y<Math.ceil(y2*H);y++)
-   for(let x=Math.floor(x1*W);x<Math.ceil(x2*W);x++)m[y*W+x]=1;
- }
- function horiz(y){
-  fillRect(.20,y-.035,.80,y+.035);
-  // small tapered ends
-  fillRect(.15,y-.015,.85,y+.015);
- }
- function vert(x,y1,y2){
-  fillRect(x-.04,y1,x+.04,y2);
-  fillRect(x-.02,y1-.015,x+.02,y2+.015);
- }
- if(seg[0])horiz(.08);
- if(seg[1])vert(.82,.11,.48);
- if(seg[2])vert(.82,.52,.89);
- if(seg[3])horiz(.92);
- if(seg[4])vert(.18,.52,.89);
- if(seg[5])vert(.18,.11,.48);
- if(seg[6])horiz(.50);
- return {mask:m,w:W,h:H};
-}
-
-const TEMPLATES=Array.from({length:10},(_,n)=>drawSegTemplate(n));
-
-function dilate(mask,w,h,r=1){
- const out=new Uint8Array(mask.length);
- for(let y=0;y<h;y++)for(let x=0;x<w;x++){
-  let on=0;
-  for(let yy=Math.max(0,y-r);yy<=Math.min(h-1,y+r)&&!on;yy++)
-   for(let xx=Math.max(0,x-r);xx<=Math.min(w-1,x+r);xx++)if(mask[yy*w+xx]){on=1;break}
-  out[y*w+x]=on;
- }
- return out;
-}
-
-function similarity(a,b,w,h){
- // Symmetric overlap after slight dilation; tolerant of segment thickness differences.
- const ad=dilate(a,w,h,1),bd=dilate(b,w,h,1);
- let inter=0,ua=0,ub=0;
+function similarity(a,b){
+ if(!a||!b||a.length!==b.length)return 0;
+ let inter=0,union=0;
  for(let i=0;i<a.length;i++){
-  if(a[i])ua++;
-  if(b[i])ub++;
-  if((a[i]&&bd[i])||(b[i]&&ad[i]))inter++;
+  if(a[i]||b[i])union++;
+  if(a[i]&&b[i])inter++;
  }
- const denom=ua+ub;
- return denom?2*inter/denom:0;
+ return union?inter/union:0;
 }
+
+function genericTemplates(){
+ // Simple seven-segment raster fallback.
+ const segs={
+  0:[1,1,1,1,1,1,0],1:[0,1,1,0,0,0,0],2:[1,1,0,1,1,0,1],3:[1,1,1,1,0,0,1],4:[0,1,1,0,0,1,1],
+  5:[1,0,1,1,0,1,1],6:[1,0,1,1,1,1,1],7:[1,1,1,0,0,0,0],8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
+ };
+ function make(bits){
+  const W=60,H=100,m=new Uint8Array(W*H);
+  const fill=(x1,y1,x2,y2)=>{for(let y=Math.floor(y1*H);y<Math.ceil(y2*H);y++)for(let x=Math.floor(x1*W);x<Math.ceil(x2*W);x++)m[y*W+x]=1}
+  if(bits[0])fill(.2,.03,.8,.10);if(bits[1])fill(.78,.08,.9,.48);if(bits[2])fill(.78,.52,.9,.92);
+  if(bits[3])fill(.2,.90,.8,.97);if(bits[4])fill(.1,.52,.22,.92);if(bits[5])fill(.1,.08,.22,.48);if(bits[6])fill(.2,.46,.8,.54);
+  return Array.from(m);
+ }
+ return Object.fromEntries(Object.entries(segs).map(([n,b])=>[n,make(b)]));
+}
+const GENERIC=genericTemplates();
 
 function classify(ex){
- if(!ex)return {n:null,score:0,all:[]};
- let scores=TEMPLATES.map((t,n)=>({n,score:similarity(ex.mask,t.mask,ex.w,ex.h)}));
- scores.sort((a,b)=>b.score-a.score);
- // Require moderate shape agreement and some separation from runner-up.
- const best=scores[0],second=scores[1];
- return {n:(best.score>.42 && best.score-second.score>.015)?best.n:null,score:best.score,all:scores.slice(0,3)};
+ if(!ex)return {n:null,score:0,src:"none"};
+ const learned=loadLearned();
+ let best={n:null,score:-1,src:""};
+ for(let n=0;n<=9;n++){
+  let samples=learned[n]||[];
+  for(const s of samples){
+    const sc=similarity(ex.mask,s);
+    if(sc>best.score)best={n,score:sc,src:"learned"};
+  }
+  const g=similarity(ex.mask,GENERIC[n]);
+  if(g>best.score)best={n,score:g,src:"generic"};
+ }
+ return best.score>.18?best:{n:null,score:best.score,src:best.src};
 }
 
-function renderNormalized(ex,canvas){
- const ctx=canvas.getContext("2d"),W=ex?.w||90,H=ex?.h||150;
- canvas.width=W;canvas.height=H;
- const id=ctx.createImageData(W,H);
- for(let i=0;i<W*H;i++){const v=ex&&ex.mask[i]?0:255;id.data[i*4]=id.data[i*4+1]=id.data[i*4+2]=v;id.data[i*4+3]=255}
- ctx.putImageData(id,0,0);
+function runExtract(){
+ currentExtracts=boxes.map(b=>({box:b,ex:extractDigit(b)}));
+ return currentExtracts;
 }
 
 $("readBtn").onclick=()=>{
- let outs=boxes.map(b=>{
-  const ex=extractDigit(b),cl=classify(ex);
-  return {box:b,ex,cl};
- });
-
- const groups=g=>outs.filter(o=>o.box.group===g);
- const value=g=>{
-  const a=groups(g);
-  return a.every(o=>o.cl.n!==null)?Number(a.map(o=>o.cl.n).join("")):null;
- };
-
- const sys=value("sys"),dia=value("dia"),pulse=value("pulse");
- $("results").style.display="grid";
- $("rSys").textContent=sys??"?";$("rDia").textContent=dia??"?";$("rPulse").textContent=pulse??"?";
- if(sys>=70&&sys<=250)$("sys").value=sys;
- if(dia>=35&&dia<=150)$("dia").value=dia;
- if(pulse>=35&&pulse<=200)$("pulse").value=pulse;
-
- $("debug").style.display="grid";
- const s0=groups("sys")[0]?.ex,d0=groups("dia")[0]?.ex,p0=groups("pulse")[0]?.ex;
- if(s0)renderNormalized(s0,$("dbgSys"));if(d0)renderNormalized(d0,$("dbgDia"));if(p0)renderNormalized(p0,$("dbgPulse"));
-
- const fmt=g=>groups(g).map(o=>{
-   const tops=o.cl.all.map(x=>`${x.n}:${x.score.toFixed(2)}`).join(",");
-   return `${o.box.label}=${o.cl.n??"?"}[${tops}]`;
- }).join(" / ");
+ const xs=runExtract().map(o=>({...o,cl:classify(o.ex)}));
+ const groups=g=>xs.filter(o=>o.box.group===g);
+ const val=g=>{const a=groups(g);return a.every(o=>o.cl.n!==null)?Number(a.map(o=>o.cl.n).join("")):null};
+ const sys=val("sys"),dia=val("dia"),pulse=val("pulse");
+ $("results").style.display="grid";$("rSys").textContent=sys??"?";$("rDia").textContent=dia??"?";$("rPulse").textContent=pulse??"?";
+ if(sys>=70&&sys<=250)$("sys").value=sys;if(dia>=35&&dia<=150)$("dia").value=dia;if(pulse>=35&&pulse<=200)$("pulse").value=pulse;
+ const fmt=g=>groups(g).map(o=>`${o.box.label}=${o.cl.n??"?"}(${o.cl.score.toFixed(2)},${o.cl.src})`).join(" / ");
  $("status").textContent=`${fmt("sys")} | ${fmt("dia")} | ${fmt("pulse")}`;
+};
+
+$("learnBtn").onclick=()=>{
+ const sys=String($("sys").value||""),dia=String($("dia").value||""),pulse=String($("pulse").value||"");
+ if(sys.length!==3||dia.length!==2||pulse.length!==2){alert("正しい上3桁・下2桁・脈拍2桁を入力してください。");return}
+ const exs=runExtract();
+ if(exs.some(x=>!x.ex)){alert("数字抽出に失敗している枠があります。枠位置を確認してください。");return}
+ const truth=(sys+dia+pulse).split("").map(Number),learned=loadLearned();
+ exs.forEach((o,i)=>{
+  const n=truth[i];
+  learned[n]=learned[n]||[];
+  learned[n].push(o.ex.mask);
+  if(learned[n].length>20)learned[n]=learned[n].slice(-20);
+ });
+ saveLearned(learned);
+ $("status").textContent=`学習しました：${sys} / ${dia} / ${pulse}。同じ実機の次回写真から優先して照合します。`;
 };
 
 function load(){try{return JSON.parse(localStorage.getItem(KEY)||"[]")}catch{return[]}}
 function persist(r){localStorage.setItem(KEY,JSON.stringify(r))}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+
 $("saveBtn").onclick=()=>{
  const sys=Number($("sys").value),dia=Number($("dia").value),pulse=Number($("pulse").value||0);
  if(!sys||!dia||sys<=dia){alert("血圧の数値を確認してください。");return}
@@ -379,6 +351,7 @@ $("saveBtn").onclick=()=>{
  const r=load();r.push({id:crypto.randomUUID?crypto.randomUUID():String(Date.now()),date:$("date").value,sys,dia,pulse:pulse||null,memo:$("memo").value.trim()});persist(r);render();
 };
 window.delRec=id=>{persist(load().filter(r=>r.id!==id));render()};
+
 function render(){
  const r=load().sort((a,b)=>a.date.localeCompare(b.date));
  $("count").textContent=r.length;$("latest").textContent=r.length?`${r.at(-1).sys}/${r.at(-1).dia}`:"—";
