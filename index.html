@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v10</title>
+<title>HEM-7271T 血圧フォト記録 v11</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c;--blue:#2563eb}
 *{box-sizing:border-box}
@@ -35,15 +35,14 @@ label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
 .stat{padding:11px;background:#f9fafb;border:1px solid var(--line);border-radius:13px}.stat b{font-size:19px;display:block}.stat span{font-size:11px;color:var(--muted)}
 table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1px solid var(--line);font-size:13px;text-align:left}th{color:var(--muted)}
 svg{width:100%;height:230px;display:block}
-.range{display:grid;grid-template-columns:1fr 90px;gap:8px;align-items:center;margin-top:10px}
 .debug{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:pre-wrap;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:10px}
 @media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v10</h1>
-<div class="sub">局所コントラストで7セグを直接判定</div>
+<h1>HEM-7271T 血圧フォト記録 v11</h1>
+<div class="sub">セグメント位置の自動探索 + 低信頼度は「?」</div>
 
 <div class="card">
  <div class="row">
@@ -69,11 +68,6 @@ svg{width:100%;height:230px;display:block}
   <button id="readBtn" disabled>読み取る</button>
   <button id="saveCalibBtn" class="secondary" disabled>枠位置を保存</button>
   <button id="resetBoxesBtn" class="secondary" disabled>枠を初期位置へ</button>
- </div>
- <div class="range">
-   <label>セグメント判定感度</label><span id="sensLabel">10</span>
-   <input id="sensitivity" type="range" min="2" max="30" value="10">
-   <span></span>
  </div>
  <div id="status" class="status" style="padding-top:10px">写真を選択してください。</div>
 
@@ -110,9 +104,8 @@ svg{width:100%;height:230px;display:block}
 
 <script>
 const $=id=>document.getElementById(id);
-const KEY="bp_hem7271t_v10", CALKEY="bp_hem7271t_digitboxes_v10";
+const KEY="bp_hem7271t_v11", CALKEY="bp_hem7271t_digitboxes_v11";
 $("date").value=new Date().toISOString().slice(0,10);
-$("sensitivity").oninput=()=>{$("sensLabel").textContent=$("sensitivity").value};
 
 let src=null,pts=[],boxes=[];
 const pc=$("photoCanvas"),pctx=pc.getContext("2d",{willReadFrequently:true}),stage=$("stage");
@@ -130,19 +123,6 @@ const DEFAULT_BOXES=[
 ];
 
 const MAP={"1111110":0,"0110000":1,"1101101":2,"1111001":3,"0110011":4,"1011011":5,"1011111":6,"1110000":7,"1111111":8,"1111011":9};
-
-// each segment has a broad target rectangle + nearby background rectangles.
-// coordinates are within a single digit box.
-const SEGMENTS={
- a:{seg:[.22,.04,.78,.20],bg:[[.22,.22,.78,.31]]},
- b:{seg:[.67,.12,.96,.47],bg:[[.47,.14,.60,.44]]},
- c:{seg:[.67,.53,.96,.88],bg:[[.47,.56,.60,.86]]},
- d:{seg:[.22,.80,.78,.97],bg:[[.22,.69,.78,.77]]},
- e:{seg:[.04,.53,.33,.88],bg:[[.40,.56,.53,.86]]},
- f:{seg:[.04,.12,.33,.47],bg:[[.40,.14,.53,.44]]},
- g:{seg:[.22,.42,.78,.60],bg:[[.22,.32,.78,.39],[.22,.63,.78,.70]]}
-};
-const ORDER=["a","b","c","d","e","f","g"];
 
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
 
@@ -230,103 +210,129 @@ function positionBoxes(){
 $("saveCalibBtn").onclick=()=>{localStorage.setItem(CALKEY,JSON.stringify(boxes));$("status").textContent="数字枠の位置を保存しました。"};
 $("resetBoxesBtn").onclick=()=>{boxes=structuredClone(DEFAULT_BOXES);makeBoxes();positionBoxes();$("status").textContent="数字枠を初期位置へ戻しました。"};
 
-function grayMean(rect,b){
- const [x1,y1,x2,y2]=rect;
- const ox=b.x*rc.width,oy=b.y*rc.height,bw=b.w*rc.width,bh=b.h*rc.height;
- const sx=Math.max(0,Math.floor(ox+x1*bw)),sy=Math.max(0,Math.floor(oy+y1*bh));
- const ex=Math.min(rc.width,Math.ceil(ox+x2*bw)),ey=Math.min(rc.height,Math.ceil(oy+y2*bh));
- const d=rctx.getImageData(sx,sy,Math.max(1,ex-sx),Math.max(1,ey-sy)).data;
- let sum=0,n=0;
- for(let i=0;i<d.length;i+=4){
-   const g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
-   // robust-ish clipping to reduce fine moire influence
-   sum+=Math.max(20,Math.min(235,g));n++;
- }
- return n?sum/n:255;
+function cropGray(b){
+ const x=Math.max(0,Math.round(b.x*rc.width)),y=Math.max(0,Math.round(b.y*rc.height));
+ const w=Math.max(10,Math.round(b.w*rc.width)),h=Math.max(10,Math.round(b.h*rc.height));
+ const d=rctx.getImageData(x,y,w,h).data;
+ const g=new Float32Array(w*h);
+ for(let i=0,j=0;i<d.length;i+=4,j++)g[j]=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+ return {g,w,h};
 }
 
-function segmentContrast(def,b){
- const seg=grayMean(def.seg,b);
- const bgs=def.bg.map(r=>grayMean(r,b));
- const bg=bgs.reduce((a,c)=>a+c,0)/bgs.length;
- return bg-seg; // positive => segment darker than local background
+function smooth1D(arr,r=2){
+ const out=new Float32Array(arr.length);
+ for(let i=0;i<arr.length;i++){let s=0,n=0;for(let k=-r;k<=r;k++){let j=i+k;if(j>=0&&j<arr.length){s+=arr[j];n++}}out[i]=s/n}
+ return out;
+}
+
+// Search the actual dark horizontal/vertical bars inside the digit.
+// We search broad expected bands, then choose the darkest local stripe relative to neighbors.
+function scanHorizontal(img,yMin,yMax){
+ const {g,w,h}=img;let profile=[];
+ for(let y=Math.floor(yMin*h);y<Math.floor(yMax*h);y++){
+   let s=0,n=0;
+   for(let x=Math.floor(.12*w);x<Math.floor(.88*w);x++){s+=g[y*w+x];n++}
+   profile.push({pos:y,val:s/n});
+ }
+ let vals=profile.map(p=>p.val);vals=smooth1D(vals,2);
+ let best=0;for(let i=1;i<vals.length;i++)if(vals[i]<vals[best])best=i;
+ const p=profile[best].pos,local=vals[best];
+ let bg=0,n=0;
+ for(let dy of [-Math.round(.08*h),Math.round(.08*h)]){
+   let yy=Math.max(0,Math.min(h-1,p+dy)),s=0,m=0;
+   for(let x=Math.floor(.12*w);x<Math.floor(.88*w);x++){s+=g[yy*w+x];m++}
+   bg+=s/m;n++;
+ }
+ return {contrast:bg/n-local,pos:p/h};
+}
+
+function scanVertical(img,xMin,xMax,yMin,yMax){
+ const {g,w,h}=img;let profile=[];
+ for(let x=Math.floor(xMin*w);x<Math.floor(xMax*w);x++){
+   let s=0,n=0;
+   for(let y=Math.floor(yMin*h);y<Math.floor(yMax*h);y++){s+=g[y*w+x];n++}
+   profile.push({pos:x,val:s/n});
+ }
+ let vals=profile.map(p=>p.val);vals=smooth1D(vals,2);
+ let best=0;for(let i=1;i<vals.length;i++)if(vals[i]<vals[best])best=i;
+ const p=profile[best].pos,local=vals[best];
+ let bg=0,n=0;
+ for(let dx of [-Math.round(.10*w),Math.round(.10*w)]){
+   let xx=Math.max(0,Math.min(w-1,p+dx)),s=0,m=0;
+   for(let y=Math.floor(yMin*h);y<Math.floor(yMax*h);y++){s+=g[y*w+xx];m++}
+   bg+=s/m;n++;
+ }
+ return {contrast:bg/n-local,pos:p/w};
 }
 
 function recognizeDigit(b){
- const contrasts=ORDER.map(k=>segmentContrast(SEGMENTS[k],b));
- const sens=Number($("sensitivity").value);
- const bits=contrasts.map(v=>v>sens?"1":"0").join("");
- if(MAP[bits]!==undefined)return {n:MAP[bits],bits,contrasts,dist:0};
+ const img=cropGray(b);
+ const A=scanHorizontal(img,.00,.25);
+ const G=scanHorizontal(img,.34,.66);
+ const D=scanHorizontal(img,.74,1.00);
+ const F=scanVertical(img,.00,.42,.08,.48);
+ const B=scanVertical(img,.58,1.00,.08,.48);
+ const E=scanVertical(img,.00,.42,.52,.92);
+ const C=scanVertical(img,.58,1.00,.52,.92);
+ const segs=[A,B,C,D,E,F,G];
 
- let best={n:null,dist:99};
+ // adaptive threshold based on distribution of the 7 contrast values
+ const vals=segs.map(s=>s.contrast);
+ const sorted=[...vals].sort((a,b)=>a-b);
+ const median=sorted[3],max=sorted[6];
+ const threshold=Math.max(5, median + (max-median)*.30);
+ const bits=vals.map(v=>v>threshold?"1":"0").join("");
+
+ let exact=MAP[bits];
+ if(exact!==undefined){
+   const confidence=(max-threshold)/Math.max(1,max);
+   return {n:exact,bits,vals,segs,confidence};
+ }
+
+ // nearest pattern; require clear separation between best and second-best
+ let candidates=[];
  for(const [pat,n] of Object.entries(MAP)){
    let dist=0;
    for(let i=0;i<7;i++){
-     // weight mismatches more when measured contrast is far from threshold
-     if(pat[i]!==bits[i]) dist += 1 + Math.min(1,Math.abs(contrasts[i]-sens)/20);
+     const expected=pat[i]==="1";
+     const strength=(vals[i]-threshold)/Math.max(5,Math.abs(max-threshold));
+     dist += expected ? Math.max(0,1-strength) : Math.max(0,1+strength);
    }
-   if(dist<best.dist)best={n:Number(n),dist};
+   candidates.push({n:Number(n),dist});
  }
- return {n:best.dist<=2.2?best.n:null,bits,contrasts,dist:best.dist};
+ candidates.sort((a,b)=>a.dist-b.dist);
+ const margin=candidates[1].dist-candidates[0].dist;
+ const confidence=Math.max(0,Math.min(1,margin/1.5));
+ return {n:confidence>=.35?candidates[0].n:null,bits,vals,segs,confidence};
 }
 
-function groupValue(group){
+function group(group){
  const rs=boxes.filter(b=>b.group===group).map(recognizeDigit);
- return {rs,value:rs.every(r=>r.n!==null)?Number(rs.map(r=>r.n).join("")):null};
-}
-
-function candidateValue(group){
- const parts=boxes.filter(b=>b.group===group).map(b=>{
-   const r=recognizeDigit(b);
-   let opts=[];
-   for(const [pat,n] of Object.entries(MAP)){
-     let score=0;
-     for(let i=0;i<7;i++){
-       const target=pat[i]==="1" ? 18 : 0;
-       score += Math.abs(r.contrasts[i]-target);
-     }
-     opts.push({digit:Number(n),score});
-   }
-   opts.sort((a,b)=>a.score-b.score);
-   return opts.slice(0,3);
- });
- let combos=[{digits:"",score:0}];
- parts.forEach(arr=>{
-   let next=[];
-   combos.forEach(base=>arr.forEach(o=>next.push({digits:base.digits+o.digit,score:base.score+o.score})));
-   combos=next.sort((a,b)=>a.score-b.score).slice(0,40);
- });
- return combos.map(c=>({...c,value:Number(c.digits)})).filter(c=>{
-   if(group==="sys")return c.value>=70&&c.value<=250;
-   if(group==="dia")return c.value>=35&&c.value<=150;
-   return c.value>=35&&c.value<=200;
- });
+ const ok=rs.every(r=>r.n!==null && r.confidence>=.35);
+ return {rs,value:ok?Number(rs.map(r=>r.n).join("")):null};
 }
 
 $("readBtn").onclick=()=>{
- const direct={sys:groupValue("sys"),dia:groupValue("dia"),pulse:groupValue("pulse")};
- let S=candidateValue("sys"),D=candidateValue("dia"),P=candidateValue("pulse");
- let best=null;
- for(const s of S.slice(0,12))for(const d of D.slice(0,12))for(const p of P.slice(0,12)){
-   if(s.value<=d.value)continue;
-   let score=s.score+d.score+p.score;
-   if(s.value-d.value<20||s.value-d.value>110)score+=30;
-   if(d.value<45||d.value>110)score+=15;
-   if(p.value<45||p.value>130)score+=10;
-   if(!best||score<best.score)best={s,d,p,score};
- }
+ const S=group("sys"),D=group("dia"),P=group("pulse");
  $("results").style.display="grid";$("debug").style.display="block";
- if(best){
-   $("rSys").textContent=best.s.value;$("rDia").textContent=best.d.value;$("rPulse").textContent=best.p.value;
-   $("sys").value=best.s.value;$("dia").value=best.d.value;$("pulse").value=best.p.value;
+
+ const show=(obj,id,input,min,max)=>{
+   if(obj.value!==null && obj.value>=min && obj.value<=max){
+     $(id).textContent=obj.value;$(input).value=obj.value;
+   }else{
+     $(id).textContent="?";$(input).value="";
+   }
+ };
+ show(S,"rSys","sys",70,250);show(D,"rDia","dia",35,150);show(P,"rPulse","pulse",35,200);
+
+ const fmt=(name,obj)=>name+" "+obj.rs.map(r=>`${r.n??"?"}[${r.bits}] conf=${r.confidence.toFixed(2)} vals=${r.vals.map(v=>v.toFixed(1)).join(",")}`).join(" / ");
+ $("debug").textContent=fmt("SYS",S)+"\n"+fmt("DIA",D)+"\n"+fmt("PULSE",P);
+
+ if(S.value!==null&&D.value!==null&&P.value!==null&&S.value>D.value){
+   $("status").textContent=`画像根拠あり：${S.value}/${D.value}、脈拍 ${P.value}。写真と照合してください。`;
  }else{
-   $("rSys").textContent=$("rDia").textContent=$("rPulse").textContent="?";
+   $("status").textContent="信頼度が不足している桁は「?」のままです。無理な補完はしていません。";
  }
- const fmt=(g)=>direct[g].rs.map(r=>`${r.n??"?"}[${r.bits}](${r.contrasts.map(v=>v.toFixed(1)).join(",")})`).join(" / ");
- $("debug").textContent=
-  `SYS ${fmt("sys")}\nDIA ${fmt("dia")}\nPULSE ${fmt("pulse")}\n`+
-  (best?`整合候補: ${best.s.value}/${best.d.value} 脈拍${best.p.value}`:"整合候補なし");
- $("status").textContent=best?`候補：${best.s.value}/${best.d.value}、脈拍 ${best.p.value}。写真と照合してください。`:"判定できませんでした。感度や枠位置を調整してください。";
 };
 
 function load(){try{return JSON.parse(localStorage.getItem(KEY)||"[]")}catch{return[]}}
