@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録</title>
+<title>HEM-7271T 血圧フォト記録 v3</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -15,13 +15,14 @@ h1{font-size:24px;margin:6px 0}.sub{color:var(--muted);font-size:14px;margin-bot
 .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:15px;margin-bottom:13px}
 button,.filebtn{display:inline-block;border:0;border-radius:12px;padding:12px 14px;font-size:15px;font-weight:700;background:var(--accent);color:#fff;cursor:pointer}
 .secondary{background:#e5e7eb;color:#111827}.danger{background:#fee2e2;color:var(--danger)}
-input[type=number],input[type=date],input[type=text]{width:100%;padding:11px;border:1px solid var(--line);border-radius:11px;font-size:16px}
+input[type=number],input[type=date],input[type=text],input[type=range]{width:100%}
+input[type=number],input[type=date],input[type=text]{padding:11px;border:1px solid var(--line);border-radius:11px;font-size:16px}
 input[type=file]{display:none}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}.grow{flex:1}
 label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
-.preview{width:100%;max-height:360px;object-fit:contain;background:#f9fafb;border:1px solid var(--line);border-radius:14px;display:block;margin-top:12px}
-.status{font-size:14px;color:var(--muted);padding:10px 0;line-height:1.5}
+.preview{width:100%;max-height:380px;object-fit:contain;background:#f9fafb;border:1px solid var(--line);border-radius:14px;display:block;margin-top:12px}
+.status{font-size:14px;color:var(--muted);padding:10px 0;line-height:1.55}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .stat{padding:11px;background:#f9fafb;border:1px solid var(--line);border-radius:13px}
 .stat b{font-size:19px;display:block}.stat span{font-size:11px;color:var(--muted)}
@@ -29,35 +30,45 @@ svg{width:100%;height:230px;display:block}
 table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1px solid var(--line);font-size:13px;text-align:left}
 th{color:var(--muted)}
 .notice{padding:10px 12px;border-radius:12px;background:#fff7ed;font-size:13px;line-height:1.5;margin-top:10px}
-.cropgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
-.cropbox{background:#f9fafb;border:1px solid var(--line);border-radius:12px;padding:8px}
-.cropbox canvas{width:100%;height:90px;object-fit:contain;background:white;border-radius:8px}
-.cropbox b{display:block;font-size:12px;margin-bottom:6px}
-@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}.cropgrid{grid-template-columns:1fr}}
+.debug{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.debugbox{border:1px solid var(--line);border-radius:12px;padding:8px;background:#fafafa}
+.debugbox canvas{width:100%;height:110px;object-fit:contain;background:#ddd;border-radius:8px}
+.debugbox b{display:block;font-size:12px;margin-bottom:5px}
+.detect{font-size:20px;font-weight:800;padding-top:5px}
+.rangegrid{display:grid;grid-template-columns:1fr 80px;gap:8px;align-items:center;margin-top:10px}
+.badge{background:#eef2ff;padding:5px 8px;border-radius:999px;font-size:12px}
+@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}.debug{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録</h1>
-<div class="sub">OMRON HEM-7271T向け・写真から「上 / 下 / 脈拍」を個別認識</div>
+<h1>HEM-7271T 血圧フォト記録 v3</h1>
+<div class="sub">7セグ液晶専用判定・OCR不使用</div>
 
 <div class="card">
   <div class="row">
     <label class="filebtn" for="photo">📷 血圧計を撮影 / 写真を選択</label>
     <input id="photo" type="file" accept="image/*" capture="environment">
-    <button id="readBtn" class="secondary" disabled>専用読み取り</button>
+    <button id="readBtn" class="secondary" disabled>7セグ読み取り</button>
   </div>
 
   <img id="preview" class="preview" style="display:none">
 
-  <div id="cropgrid" class="cropgrid" style="display:none">
-    <div class="cropbox"><b>上（SYS）</b><canvas id="cSys"></canvas></div>
-    <div class="cropbox"><b>下（DIA）</b><canvas id="cDia"></canvas></div>
-    <div class="cropbox"><b>脈拍（PULSE）</b><canvas id="cPulse"></canvas></div>
+  <div class="rangegrid">
+    <label>液晶の濃さ補正（写真ごとの調整用）</label>
+    <span id="thresholdLabel" class="badge">0</span>
+    <input id="thresholdAdj" type="range" min="-40" max="40" value="0">
+    <span></span>
   </div>
 
-  <div id="status" class="status">血圧計の表示部が写真中央に大きく入るよう撮影してください。</div>
-  <div class="notice">OCRは誤読することがあります。保存前に必ず写真と数値を照合してください。</div>
+  <div id="debug" class="debug" style="display:none">
+    <div class="debugbox"><b>上 SYS</b><canvas id="sysCanvas"></canvas><div id="sysDetect" class="detect">—</div></div>
+    <div class="debugbox"><b>下 DIA</b><canvas id="diaCanvas"></canvas><div id="diaDetect" class="detect">—</div></div>
+    <div class="debugbox"><b>脈拍 PULSE</b><canvas id="pulseCanvas"></canvas><div id="pulseDetect" class="detect">—</div></div>
+  </div>
+
+  <div id="status" class="status">本体を縦向き・真正面に近い角度で、写真いっぱいに写してください。</div>
+  <div class="notice">実験版です。自動入力後も必ず元写真と照合してから保存してください。</div>
 </div>
 
 <div class="card">
@@ -88,123 +99,209 @@ th{color:var(--muted)}
 </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
-const KEY="bp_hem7271t_records_v2";
+const KEY="bp_hem7271t_records_v3";
 const $=id=>document.getElementById(id);
 $("date").value=new Date().toISOString().slice(0,10);
+let file=null, sourceImage=null;
 
-let file=null;
+/*
+  Calibration from the supplied HEM-7271T photo.
+  Screen ROI is expressed as a fraction of the full photo.
+  Inside the normalized LCD, the three rows are fixed.
+*/
+const SCREEN={x:.285,y:.185,w:.525,h:.49};
 
-const ROIS = {
-  sys:   {x:0.34,y:0.29,w:0.34,h:0.19},
-  dia:   {x:0.36,y:0.44,w:0.32,h:0.18},
-  pulse: {x:0.47,y:0.57,w:0.21,h:0.12}
+// digit boxes inside normalized 1000 x 1000 LCD
+const ROWS={
+  sys:{y:.23,h:.30, xs:[[.16,.30],[.30,.51],[.51,.70]]},
+  dia:{y:.49,h:.27, xs:[[.25,.43],[.43,.62]]},
+  pulse:{y:.73,h:.18,xs:[[.42,.56],[.56,.71]]}
 };
 
-$("photo").addEventListener("change", e=>{
-  file=e.target.files?.[0]||null;
-  if(!file)return;
-  $("preview").src=URL.createObjectURL(file);
-  $("preview").style.display="block";
-  $("readBtn").disabled=false;
-  $("status").textContent="写真を選択しました。専用読み取りを押してください。";
+const DIGIT_MAP={
+  "1111110":0, "0110000":1, "1101101":2, "1111001":3, "0110011":4,
+  "1011011":5, "1011111":6, "1110000":7, "1111111":8, "1111011":9
+};
+
+// segment sample rectangles inside a single digit box
+const SEG={
+ a:[.23,.03,.77,.18],
+ b:[.70,.12,.96,.47],
+ c:[.70,.53,.96,.88],
+ d:[.23,.82,.77,.98],
+ e:[.04,.53,.30,.88],
+ f:[.04,.12,.30,.47],
+ g:[.23,.42,.77,.60]
+};
+const SEG_ORDER=["a","b","c","d","e","f","g"];
+
+$("thresholdAdj").addEventListener("input",()=>{
+  $("thresholdLabel").textContent=$("thresholdAdj").value;
 });
 
-function loadImage(file){
-  return new Promise((resolve,reject)=>{
-    const img=new Image();
-    img.onload=()=>resolve(img);
-    img.onerror=reject;
-    img.src=URL.createObjectURL(file);
-  });
-}
-
-function cropAndPreprocess(img, roi, canvasId){
-  const sx=Math.round(img.naturalWidth*roi.x);
-  const sy=Math.round(img.naturalHeight*roi.y);
-  const sw=Math.round(img.naturalWidth*roi.w);
-  const sh=Math.round(img.naturalHeight*roi.h);
-
-  const outW=900;
-  const outH=Math.max(250, Math.round(outW*(sh/sw)));
-  const canvas=$(canvasId);
-  canvas.width=outW; canvas.height=outH;
-  const ctx=canvas.getContext("2d",{willReadFrequently:true});
-  ctx.drawImage(img,sx,sy,sw,sh,0,0,outW,outH);
-
-  const im=ctx.getImageData(0,0,outW,outH);
-  const d=im.data;
-  for(let i=0;i<d.length;i+=4){
-    const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
-    const v = g < 150 ? 0 : 255;
-    d[i]=d[i+1]=d[i+2]=v;
-  }
-  ctx.putImageData(im,0,0);
-  return canvas;
-}
-
-async function ocrDigits(canvas){
-  const result=await Tesseract.recognize(canvas,"eng",{
-    logger:m=>{
-      if(m.status==="recognizing text"){
-        $("status").textContent=`読み取り中… ${Math.round((m.progress||0)*100)}%`;
-      }
-    },
-    tessedit_char_whitelist:"0123456789"
-  });
-  return (result.data.text||"").replace(/\D/g,"");
-}
-
-function chooseNumber(raw,min,max){
-  if(!raw)return null;
-  const tries=[raw];
-  for(let len=3;len>=2;len--){
-    for(let i=0;i<=raw.length-len;i++) tries.push(raw.slice(i,i+len));
-  }
-  for(const s of tries){
-    const n=Number(s);
-    if(n>=min&&n<=max)return n;
-  }
-  return null;
-}
-
-$("readBtn").addEventListener("click", async()=>{
+$("photo").addEventListener("change",async e=>{
+  file=e.target.files?.[0]||null;
   if(!file)return;
-  if(!window.Tesseract){
-    $("status").textContent="OCR機能を読み込めませんでした。通信環境を確認してください。";
-    return;
+  const url=URL.createObjectURL(file);
+  $("preview").src=url;
+  $("preview").style.display="block";
+  sourceImage=await loadImage(file);
+  $("readBtn").disabled=false;
+  $("status").textContent="写真を選択しました。「7セグ読み取り」を押してください。";
+});
+
+function loadImage(f){
+ return new Promise((resolve,reject)=>{
+   const im=new Image();
+   im.onload=()=>resolve(im); im.onerror=reject;
+   im.src=URL.createObjectURL(f);
+ });
+}
+
+function normalizeScreen(img){
+  const c=document.createElement("canvas");
+  c.width=1000;c.height=1000;
+  const ctx=c.getContext("2d",{willReadFrequently:true});
+  ctx.drawImage(
+    img,
+    img.naturalWidth*SCREEN.x,img.naturalHeight*SCREEN.y,
+    img.naturalWidth*SCREEN.w,img.naturalHeight*SCREEN.h,
+    0,0,1000,1000
+  );
+  return c;
+}
+
+function cropRow(screen,row,outId){
+  const out=$(outId);
+  out.width=900;out.height=Math.round(900*row.h/.55);
+  const ctx=out.getContext("2d");
+  ctx.drawImage(screen,1000*.10,1000*row.y,1000*.62,1000*row.h,0,0,out.width,out.height);
+  return out;
+}
+
+function digitCanvas(screen,x1,x2,y,h){
+  const c=document.createElement("canvas");
+  c.width=180;c.height=300;
+  c.getContext("2d").drawImage(screen,
+    1000*x1,1000*y,1000*(x2-x1),1000*h,
+    0,0,c.width,c.height);
+  return c;
+}
+
+function grayscaleStats(canvas){
+  const ctx=canvas.getContext("2d",{willReadFrequently:true});
+  const d=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+  let vals=[];
+  for(let i=0;i<d.length;i+=16){
+    vals.push(.299*d[i]+.587*d[i+1]+.114*d[i+2]);
   }
-  $("readBtn").disabled=true;
-  $("cropgrid").style.display="grid";
+  vals.sort((a,b)=>a-b);
+  const q=p=>vals[Math.min(vals.length-1,Math.floor(vals.length*p))];
+  return {q20:q(.20),q50:q(.50),q80:q(.80)};
+}
+
+function segmentScore(canvas,rect,threshold){
+  const ctx=canvas.getContext("2d",{willReadFrequently:true});
+  const [x1,y1,x2,y2]=rect;
+  const sx=Math.floor(x1*canvas.width), sy=Math.floor(y1*canvas.height);
+  const sw=Math.max(1,Math.floor((x2-x1)*canvas.width)), sh=Math.max(1,Math.floor((y2-y1)*canvas.height));
+  const d=ctx.getImageData(sx,sy,sw,sh).data;
+  let dark=0,total=0;
+  for(let i=0;i<d.length;i+=4){
+    const g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+    if(g<threshold)dark++;
+    total++;
+  }
+  return dark/total;
+}
+
+function nearestDigit(bits,scores){
+  if(DIGIT_MAP[bits]!==undefined)return {digit:DIGIT_MAP[bits],distance:0};
+  let best={digit:null,distance:99};
+  for(const [pattern,digit] of Object.entries(DIGIT_MAP)){
+    let dist=0;
+    for(let i=0;i<7;i++){
+      if(pattern[i]!==bits[i])dist++;
+    }
+    if(dist<best.distance)best={digit,distance:dist};
+  }
+  // Accept only one missing/extra segment.
+  return best.distance<=1?best:{digit:null,distance:best.distance};
+}
+
+function detectDigit(canvas){
+  const st=grayscaleStats(canvas);
+  const adj=Number($("thresholdAdj").value);
+  // adaptive threshold between dark LCD segments and screen background
+  const threshold=Math.max(55,Math.min(190,(st.q20+st.q80)/2+adj));
+
+  const scores=SEG_ORDER.map(k=>segmentScore(canvas,SEG[k],threshold));
+  // A segment is "on" if enough pixels in its region are dark.
+  // adaptive cutoff; larger side segments tend to score lower due to slant.
+  const bits=scores.map((v,i)=>v>(i===0||i===3||i===6?.16:.12)?"1":"0").join("");
+  const n=nearestDigit(bits,scores);
+  return {digit:n.digit,bits,scores,threshold,distance:n.distance};
+}
+
+function readRow(screen,row){
+  let digits=[],debug=[];
+  for(const [x1,x2] of row.xs){
+    const c=digitCanvas(screen,x1,x2,row.y,row.h);
+    const r=detectDigit(c);
+    digits.push(r.digit);
+    debug.push(r);
+  }
+  if(digits.some(x=>x===null))return {value:null,digits,debug};
+  return {value:Number(digits.join("")),digits,debug};
+}
+
+function plausibility(sys,dia,pulse){
+  return {
+    sys:sys>=70&&sys<=250?sys:null,
+    dia:dia>=35&&dia<=150?dia:null,
+    pulse:pulse>=35&&pulse<=200?pulse:null
+  };
+}
+
+$("readBtn").addEventListener("click",()=>{
+  if(!sourceImage)return;
+  $("debug").style.display="grid";
+  $("status").textContent="7セグを解析中…";
 
   try{
-    $("status").textContent="写真を解析しています…";
-    const img=await loadImage(file);
-    const c1=cropAndPreprocess(img,ROIS.sys,"cSys");
-    const c2=cropAndPreprocess(img,ROIS.dia,"cDia");
-    const c3=cropAndPreprocess(img,ROIS.pulse,"cPulse");
+    const screen=normalizeScreen(sourceImage);
+    cropRow(screen,ROWS.sys,"sysCanvas");
+    cropRow(screen,ROWS.dia,"diaCanvas");
+    cropRow(screen,ROWS.pulse,"pulseCanvas");
 
-    const [rSys,rDia,rPulse]=await Promise.all([
-      ocrDigits(c1),ocrDigits(c2),ocrDigits(c3)
-    ]);
+    const rs=readRow(screen,ROWS.sys);
+    const rd=readRow(screen,ROWS.dia);
+    const rp=readRow(screen,ROWS.pulse);
+    const p=plausibility(rs.value,rd.value,rp.value);
 
-    const sys=chooseNumber(rSys,70,250);
-    const dia=chooseNumber(rDia,35,150);
-    const pulse=chooseNumber(rPulse,35,200);
+    $("sysDetect").textContent=rs.value??"?";
+    $("diaDetect").textContent=rd.value??"?";
+    $("pulseDetect").textContent=rp.value??"?";
 
-    if(sys)$("sys").value=sys;
-    if(dia)$("dia").value=dia;
-    if(pulse)$("pulse").value=pulse;
+    if(p.sys)$("sys").value=p.sys;
+    if(p.dia)$("dia").value=p.dia;
+    if(p.pulse)$("pulse").value=p.pulse;
 
-    $("status").textContent =
-      `認識候補：上 ${sys??"?"} / 下 ${dia??"?"} / 脈拍 ${pulse??"?"}。`+
-      ` OCR生値 SYS:${rSys||"-"} DIA:${rDia||"-"} PULSE:${rPulse||"-"}。写真と照合してください。`;
+    const dbg = [
+      `SYS bits:${rs.debug.map(x=>x.bits).join("/")}`,
+      `DIA bits:${rd.debug.map(x=>x.bits).join("/")}`,
+      `PULSE bits:${rp.debug.map(x=>x.bits).join("/")}`
+    ].join("  ");
+
+    if(p.sys&&p.dia&&p.pulse){
+      $("status").textContent=`自動入力しました：${p.sys}/${p.dia} mmHg、脈拍 ${p.pulse}。写真と照合してください。 ${dbg}`;
+    }else{
+      $("status").textContent=`一部を判定できませんでした。濃さ補正を少し動かして再読み取りしてください。 ${dbg}`;
+    }
   }catch(e){
     console.error(e);
-    $("status").textContent="読み取りに失敗しました。表示部を真正面から大きく撮影して再試行してください。";
-  }finally{
-    $("readBtn").disabled=false;
+    $("status").textContent="解析に失敗しました。血圧計を写真いっぱいに、縦向き・真正面で撮影してください。";
   }
 });
 
@@ -213,80 +310,56 @@ function persist(r){localStorage.setItem(KEY,JSON.stringify(r))}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 
 $("saveBtn").addEventListener("click",()=>{
-  const sys=Number($("sys").value),dia=Number($("dia").value),pulse=Number($("pulse").value||0);
-  if(!sys||!dia){alert("上と下の血圧を確認してください。");return}
-  if(sys<=dia){alert("上の血圧は下の血圧より大きい値か確認してください。");return}
-  if(!confirm(`保存しますか？\n${$("date").value}  ${sys}/${dia} mmHg${pulse?`  脈拍 ${pulse}`:""}`))return;
+ const sys=Number($("sys").value),dia=Number($("dia").value),pulse=Number($("pulse").value||0);
+ if(!sys||!dia){alert("上と下の血圧を確認してください。");return}
+ if(sys<=dia){alert("上の血圧は下の血圧より大きい値か確認してください。");return}
+ if(!confirm(`保存しますか？\n${$("date").value}  ${sys}/${dia} mmHg${pulse?`  脈拍 ${pulse}`:""}`))return;
 
-  const r=load();
-  r.push({
-    id:crypto.randomUUID?crypto.randomUUID():String(Date.now()),
-    date:$("date").value,sys,dia,pulse:pulse||null,memo:$("memo").value.trim()
-  });
-  persist(r);
-  $("sys").value=$("dia").value=$("pulse").value=$("memo").value="";
-  render();
+ const r=load();
+ r.push({id:crypto.randomUUID?crypto.randomUUID():String(Date.now()),date:$("date").value,sys,dia,pulse:pulse||null,memo:$("memo").value.trim()});
+ persist(r);
+ $("sys").value=$("dia").value=$("pulse").value=$("memo").value="";
+ render();
 });
 
 window.delRec=id=>{persist(load().filter(r=>r.id!==id));render()};
 
 function render(){
-  const r=load().sort((a,b)=>a.date.localeCompare(b.date));
-  $("count").textContent=r.length;
-  $("latest").textContent=r.length?`${r.at(-1).sys}/${r.at(-1).dia}`:"—";
-  if(r.length){
-    const as=r.reduce((s,x)=>s+x.sys,0)/r.length;
-    const ad=r.reduce((s,x)=>s+x.dia,0)/r.length;
-    $("avg").textContent=`${as.toFixed(0)}/${ad.toFixed(0)}`;
-  }else $("avg").textContent="—";
+ const r=load().sort((a,b)=>a.date.localeCompare(b.date));
+ $("count").textContent=r.length;
+ $("latest").textContent=r.length?`${r.at(-1).sys}/${r.at(-1).dia}`:"—";
+ if(r.length){
+   const as=r.reduce((s,x)=>s+x.sys,0)/r.length;
+   const ad=r.reduce((s,x)=>s+x.dia,0)/r.length;
+   $("avg").textContent=`${as.toFixed(0)}/${ad.toFixed(0)}`;
+ }else $("avg").textContent="—";
 
-  $("history").innerHTML=r.length
-    ? `<table><thead><tr><th>日付</th><th>血圧</th><th>脈拍</th><th>メモ</th><th></th></tr></thead><tbody>${
-      [...r].reverse().map(x=>`<tr><td>${esc(x.date)}</td><td>${x.sys}/${x.dia}</td><td>${x.pulse??"—"}</td><td>${esc(x.memo)}</td><td><button class="danger" onclick="delRec('${x.id}')">削除</button></td></tr>`).join("")
-    }</tbody></table>`
-    : `<div class="status">まだ記録がありません。</div>`;
-
-  draw(r);
+ $("history").innerHTML=r.length?`<table><thead><tr><th>日付</th><th>血圧</th><th>脈拍</th><th>メモ</th><th></th></tr></thead><tbody>${
+   [...r].reverse().map(x=>`<tr><td>${esc(x.date)}</td><td>${x.sys}/${x.dia}</td><td>${x.pulse??"—"}</td><td>${esc(x.memo)}</td><td><button class="danger" onclick="delRec('${x.id}')">削除</button></td></tr>`).join("")
+ }</tbody></table>`:`<div class="status">まだ記録がありません。</div>`;
+ draw(r);
 }
 
 function draw(r){
-  const svg=$("chart"),W=700,H=230,p=30;
-  if(!r.length){
-    svg.innerHTML=`<text x="350" y="115" text-anchor="middle" fill="#9ca3af">記録するとグラフが表示されます</text>`;
-    return;
-  }
-  const vals=r.flatMap(x=>[x.sys,x.dia]);
-  let min=Math.min(...vals)-10,max=Math.max(...vals)+10;
-  const x=i=>p+(r.length===1?(W-2*p)/2:i*(W-2*p)/(r.length-1));
-  const y=v=>H-p-(v-min)*(H-2*p)/(max-min);
-  const pts=f=>r.map((a,i)=>`${x(i)},${y(a[f])}`).join(" ");
-  let h=`<line x1="${p}" y1="${H-p}" x2="${W-p}" y2="${H-p}" stroke="#d1d5db"/>
-         <line x1="${p}" y1="${p}" x2="${p}" y2="${H-p}" stroke="#d1d5db"/>`;
-  h+=`<polyline points="${pts("sys")}" fill="none" stroke="#111827" stroke-width="3"/>
-      <polyline points="${pts("dia")}" fill="none" stroke="#6b7280" stroke-width="3"/>`;
-  r.forEach((a,i)=>{
-    h+=`<circle cx="${x(i)}" cy="${y(a.sys)}" r="4" fill="#111827"/>
-        <circle cx="${x(i)}" cy="${y(a.dia)}" r="4" fill="#6b7280"/>`;
-  });
-  svg.innerHTML=h;
+ const svg=$("chart"),W=700,H=230,p=30;
+ if(!r.length){svg.innerHTML=`<text x="350" y="115" text-anchor="middle" fill="#9ca3af">記録するとグラフが表示されます</text>`;return}
+ const vals=r.flatMap(x=>[x.sys,x.dia]);let min=Math.min(...vals)-10,max=Math.max(...vals)+10;
+ const x=i=>p+(r.length===1?(W-2*p)/2:i*(W-2*p)/(r.length-1));
+ const y=v=>H-p-(v-min)*(H-2*p)/(max-min);
+ const pts=f=>r.map((a,i)=>`${x(i)},${y(a[f])}`).join(" ");
+ let h=`<line x1="${p}" y1="${H-p}" x2="${W-p}" y2="${H-p}" stroke="#d1d5db"/><line x1="${p}" y1="${p}" x2="${p}" y2="${H-p}" stroke="#d1d5db"/>`;
+ h+=`<polyline points="${pts("sys")}" fill="none" stroke="#111827" stroke-width="3"/><polyline points="${pts("dia")}" fill="none" stroke="#6b7280" stroke-width="3"/>`;
+ r.forEach((a,i)=>{h+=`<circle cx="${x(i)}" cy="${y(a.sys)}" r="4" fill="#111827"/><circle cx="${x(i)}" cy="${y(a.dia)}" r="4" fill="#6b7280"/>`});
+ svg.innerHTML=h;
 }
 
-$("clearBtn").addEventListener("click",()=>{
-  if(confirm("全記録を削除しますか？")){
-    localStorage.removeItem(KEY);render();
-  }
-});
-
+$("clearBtn").addEventListener("click",()=>{if(confirm("全記録を削除しますか？")){localStorage.removeItem(KEY);render()}});
 $("csvBtn").addEventListener("click",()=>{
-  const r=load().sort((a,b)=>a.date.localeCompare(b.date));
-  const rows=[["date","systolic","diastolic","pulse","memo"],...r.map(x=>[x.date,x.sys,x.dia,x.pulse??"",x.memo||""])];
-  const csv=rows.map(row=>row.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\n");
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv"}));
-  a.download="blood_pressure_hem7271t.csv";
-  a.click();
+ const r=load().sort((a,b)=>a.date.localeCompare(b.date));
+ const rows=[["date","systolic","diastolic","pulse","memo"],...r.map(x=>[x.date,x.sys,x.dia,x.pulse??"",x.memo||""])];
+ const csv=rows.map(row=>row.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\n");
+ const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv"}));a.download="blood_pressure_hem7271t.csv";a.click();
 });
-
 if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
 render();
 </script>
