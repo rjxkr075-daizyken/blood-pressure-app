@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v12</title>
+<title>HEM-7271T 血圧フォト記録 v12.1</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c;--blue:#2563eb}
 *{box-sizing:border-box}
@@ -44,13 +44,17 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v12</h1>
+<h1>HEM-7271T 血圧フォト記録 v12.1</h1>
 <div class="sub">背景差分で液晶セグメントを強調 + 候補差が小さい場合は「?」</div>
 
 <div class="card">
  <div class="row">
-  <label class="filebtn" for="photo">📷 撮影 / 写真を選択</label>
-  <input id="photo" type="file" accept="image/*" capture="environment">
+  <label class="filebtn" for="cameraPhoto">📷 今撮影する</label>
+  <input id="cameraPhoto" type="file" accept="image/*" capture="environment">
+
+  <label class="filebtn secondary" for="libraryPhoto">🖼 写真から選ぶ</label>
+  <input id="libraryPhoto" type="file" accept="image/*">
+
   <button id="rectifyBtn" class="secondary" disabled>液晶を補正</button>
  </div>
 
@@ -139,16 +143,27 @@ const PAT={
 
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
 
-$("photo").onchange=async e=>{
- const f=e.target.files?.[0];if(!f)return;
+async function handlePhotoFile(f){
+ if(!f)return;
  src=await loadImage(f);
  const maxW=1000,scale=Math.min(1,maxW/src.naturalWidth);
  pc.width=Math.round(src.naturalWidth*scale);pc.height=Math.round(src.naturalHeight*scale);
+ pctx.clearRect(0,0,pc.width,pc.height);
  pctx.drawImage(src,0,0,pc.width,pc.height);
  stage.style.display="block";
  pts=[{x:pc.width*.29,y:pc.height*.20},{x:pc.width*.79,y:pc.height*.20},{x:pc.width*.79,y:pc.height*.66},{x:pc.width*.29,y:pc.height*.66}];
  positionHandles();$("rectifyBtn").disabled=false;
- $("status").textContent="4つの丸をLCD面の四隅に合わせてください。";
+ $("status").textContent="写真を読み込みました。4つの丸をLCD面の四隅に合わせてください。";
+}
+
+$("cameraPhoto").onchange=async e=>{
+ const f=e.target.files?.[0]; await handlePhotoFile(f);
+ e.target.value="";
+};
+
+$("libraryPhoto").onchange=async e=>{
+ const f=e.target.files?.[0]; await handlePhotoFile(f);
+ e.target.value="";
 };
 
 function positionHandles(){
