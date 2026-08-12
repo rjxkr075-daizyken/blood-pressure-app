@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v25</title>
+<title>HEM-7271T 血圧フォト記録 v26</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -48,7 +48,7 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v25</h1>
+<h1>HEM-7271T 血圧フォト記録 v26</h1>
 <div class="sub">濃いLCDセグメント分離 + 形状判定（V23修正版2）</div>
 
 <div class="card">
@@ -75,8 +75,9 @@ svg{width:100%;height:230px;display:block}
  <div id="presetStage">
    <canvas id="presetCanvas" width="900" height="700"></canvas>
  </div>
- <div class="presetHint">青枠はドラッグで移動、右下の赤丸で縦横に拡大縮小できます。数字1個の上下左右が切れず、少し余白まで入る大きさにしてください。</div>
+ <div class="presetHint">V26では通常、7個の青枠を画像から自動検出します。青枠は確認用で、自動検出に失敗した場合だけ手動で修正できます。</div>
  <div class="row" style="margin-top:10px">
+  <button id="autoBoxesBtn" class="secondary" disabled>桁位置を自動検出</button>
   <button id="readBtn" disabled>HEM-7271T専用解析</button>
   <button id="savePresetBtn" class="secondary" disabled>桁位置を保存</button>
   <button id="resetPresetBtn" class="secondary" disabled>初期位置へ戻す</button>
@@ -280,7 +281,7 @@ function positionPreset(flat=flatPreset()){
 window.addEventListener("resize",()=>positionPreset());
 
 $("savePresetBtn").onclick=()=>{
- localStorage.setItem(PRESET_KEY,JSON.stringify(DIGIT_BOXES));
+ localStorage.setItem(PRESET_KEY,JSON.stringify(DIGIT_BOXES)); V26_MANUAL_OVERRIDE=true;
  $("status").textContent="V25桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
 };
 $("resetPresetBtn").onclick=()=>{
@@ -343,7 +344,7 @@ function rectify(){
  }
  rctx.putImageData(dst,0,0);rc.style.display="block";
  loadPreset(); buildPresetOverlay();
- ["readBtn","savePresetBtn","resetPresetBtn"].forEach(id=>$(id).disabled=false);
+ ["autoBoxesBtn","readBtn","savePresetBtn","resetPresetBtn"].forEach(id=>$(id).disabled=false);
  $("status").textContent="LCD全体を1枚で表示しました。7個の青枠に各数字1個が丸ごと入るよう調整して保存してください。";
 }
 $("rectifyBtn").onclick=rectify;
@@ -713,6 +714,134 @@ function classifyFixedDigit(box){
  };
 }
 
+
+function smooth1dV26(a,r=2){
+ const out=new Float32Array(a.length);
+ for(let i=0;i<a.length;i++){
+   let s=0,n=0;
+   for(let j=Math.max(0,i-r);j<=Math.min(a.length-1,i+r);j++){s+=a[j];n++}
+   out[i]=n?s/n:0;
+ }
+ return out;
+}
+function runsV26(profile,th,minLen){
+ const out=[]; let s=-1;
+ for(let i=0;i<profile.length;i++){
+   if(profile[i]>=th){ if(s<0)s=i; }
+   else if(s>=0){ if(i-s>=minLen)out.push([s,i]); s=-1; }
+ }
+ if(s>=0 && profile.length-s>=minLen)out.push([s,profile.length]);
+ return out;
+}
+function mergeRunsV26(runs,gap){
+ if(!runs.length)return [];
+ const out=[runs[0].slice()];
+ for(let i=1;i<runs.length;i++){
+   const last=out[out.length-1],cur=runs[i];
+   if(cur[0]-last[1]<=gap)last[1]=cur[1];
+   else out.push(cur.slice());
+ }
+ return out;
+}
+function findRowV26(mask,w,h,ya,yb){
+ const p=new Float32Array(h);
+ for(let y=Math.floor(ya*h);y<Math.ceil(yb*h);y++){
+   let s=0;
+   for(let x=0;x<w;x++)s+=mask[y*w+x];
+   p[y]=s/w;
+ }
+ const sm=smooth1dV26(p,2);
+ let mx=0; for(const v of sm)mx=Math.max(mx,v);
+ const rr=runsV26(sm,Math.max(.008,mx*.18),Math.max(3,Math.round(h*.018)));
+ if(!rr.length)return null;
+ rr.sort((a,b)=>(b[1]-b[0])-(a[1]-a[0]));
+ const r=rr[0];
+ return {y1:Math.max(0,r[0]-Math.round(h*.02)),y2:Math.min(h,r[1]+Math.round(h*.02))};
+}
+function splitDigitsV26(mask,w,row,count){
+ const p=new Float32Array(w);
+ for(let x=0;x<w;x++){
+   let s=0;
+   for(let y=row.y1;y<row.y2;y++)s+=mask[y*w+x];
+   p[x]=s/Math.max(1,row.y2-row.y1);
+ }
+ const sm=smooth1dV26(p,2);
+ let mx=0; for(const v of sm)mx=Math.max(mx,v);
+ let rr=mergeRunsV26(
+   runsV26(sm,Math.max(.012,mx*.16),Math.max(2,Math.round(w*.006))),
+   Math.max(2,Math.round(w*.01))
+ );
+ rr=rr.filter(r=>r[0]<w*.80 && (r[1]-r[0])>=Math.round(w*.012));
+ if(rr.length<count)return null;
+
+ // Group black pieces into expected digit columns using 1-D k means.
+ const centers=rr.map(r=>(r[0]+r[1])/2);
+ const minC=Math.min(...centers),maxC=Math.max(...centers);
+ let means=Array.from({length:count},(_,i)=>minC+(maxC-minC)*(i+.5)/count);
+ for(let it=0;it<15;it++){
+   const g=Array.from({length:count},()=>[]);
+   centers.forEach((c,idx)=>{
+     let bi=0,bd=1e9;
+     means.forEach((m,i)=>{const d=Math.abs(c-m);if(d<bd){bd=d;bi=i}});
+     g[bi].push(idx);
+   });
+   g.forEach((arr,i)=>{
+     if(arr.length)means[i]=arr.reduce((s,idx)=>s+centers[idx],0)/arr.length;
+   });
+ }
+ const order=means.map((m,i)=>({m,i})).sort((a,b)=>a.m-b.m);
+ const boxes=[];
+ for(const o of order){
+   const members=[];
+   rr.forEach((r,idx)=>{
+     let bi=0,bd=1e9;
+     means.forEach((m,i)=>{const d=Math.abs(centers[idx]-m);if(d<bd){bd=d;bi=i}});
+     if(bi===o.i)members.push(r);
+   });
+   if(!members.length)return null;
+   let x1=Math.min(...members.map(r=>r[0])),x2=Math.max(...members.map(r=>r[1]));
+   const pad=Math.max(3,Math.round((x2-x1)*.25));
+   boxes.push({x1:Math.max(0,x1-pad),x2:Math.min(w,x2+pad),y1:row.y1,y2:row.y2});
+ }
+ return boxes;
+}
+function autoDetectDigitBoxesV26(){
+ if(!rc || !rc.width || !rc.height)throw new Error("先に液晶を補正してください。");
+ const prep=localContrastMask(rc);
+ const {mask,w,h}=prep;
+
+ // Broad HEM-7271T row zones only. Exact digit positions are detected from image.
+ const sysRow=findRowV26(mask,w,h,.08,.44);
+ const diaRow=findRowV26(mask,w,h,.34,.72);
+ const pulseRow=findRowV26(mask,w,h,.65,.99);
+ if(!sysRow||!diaRow||!pulseRow)throw new Error("SYS/DIA/PULSEの行を検出できませんでした。");
+
+ const s=splitDigitsV26(mask,w,sysRow,3);
+ const d=splitDigitsV26(mask,w,diaRow,2);
+ const q=splitDigitsV26(mask,w,pulseRow,2);
+ if(!s||!d||!q)throw new Error("7桁への自動分割に失敗しました。");
+
+ const norm=(b,label)=>({x:b.x1/w,y:b.y1/h,w:(b.x2-b.x1)/w,h:(b.y2-b.y1)/h,label});
+ DIGIT_BOXES={
+   sys:s.map((b,i)=>norm(b,"SYS"+(i+1))),
+   dia:d.map((b,i)=>norm(b,"DIA"+(i+1))),
+   pulse:q.map((b,i)=>norm(b,"P"+(i+1)))
+ };
+ buildPresetOverlay();
+ return DIGIT_BOXES;
+}
+
+let V26_MANUAL_OVERRIDE=false;
+$("autoBoxesBtn").onclick=()=>{
+ try{
+   V26_MANUAL_OVERRIDE=false;
+   autoDetectDigitBoxesV26();
+   $("status").textContent="7桁の位置を自動検出しました。青枠は確認用です。そのまま解析できます。";
+ }catch(err){
+   $("status").textContent="自動検出に失敗しました："+errorText(err);
+ }
+};
+
 function v25StructuralOverride(r){
  const a=r.features.rel;
  // rel order:
@@ -812,6 +941,17 @@ $("readBtn").onclick=async()=>{
  try{
    await nextFrame();
 
+   if(!V26_MANUAL_OVERRIDE){
+     try{
+       setRuntimeLog("解析開始\n桁位置を自動検出中…");
+       $("status").textContent="桁位置を自動検出中…";
+       autoDetectDigitBoxesV26();
+       await nextFrame();
+     }catch(autoErr){
+       setRuntimeLog("自動桁位置検出に失敗しました。現在の青枠を使います。\n"+errorText(autoErr));
+     }
+   }
+
    setRuntimeLog("解析開始\n1/3 SYSを解析中…");
    $("status").textContent="SYSを解析中…";
    await nextFrame();
@@ -846,7 +986,7 @@ $("readBtn").onclick=async()=>{
      `${r.n??"?"} conf=${r.confidence.toFixed(2)} margin=${r.margin.toFixed(2)} `+
      `rel=${r.features.rel.map(v=>v.toFixed(2)).join(",")} `+
      `${r.overrideReason ? "override="+r.overrideReason+" base="+(r.baseN??"?")+" " : ""}`+
-     `cuts=gray:${r.features.absCut.toFixed(1)},contrast:${r.features.conCut.toFixed(1)} crop=v25`
+     `cuts=gray:${r.features.absCut.toFixed(1)},contrast:${r.features.conCut.toFixed(1)} crop=v26-auto`
    ).join(" / ");
 
    const log=fmt("SYS",S)+"\n"+fmt("DIA",D)+"\n"+fmt("PULSE",P);
