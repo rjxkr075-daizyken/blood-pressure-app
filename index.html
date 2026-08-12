@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v21</title>
+<title>HEM-7271T 血圧フォト記録 v22</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -48,8 +48,8 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v21</h1>
-<div class="sub">LCD全体1枚で7桁を直接校正</div>
+<h1>HEM-7271T 血圧フォト記録 v22</h1>
+<div class="sub">形状解析エンジン（学習なし）</div>
 
 <div class="card">
  <div class="row">
@@ -66,7 +66,7 @@ svg{width:100%;height:230px;display:block}
   <div class="handle" data-i="0"></div><div class="handle" data-i="1"></div>
   <div class="handle" data-i="2"></div><div class="handle" data-i="3"></div>
  </div>
- <div class="notice">4つの丸をLCD面の四隅へ合わせてください。V21では補正後のLCD全体を1枚で表示し、その上で7個の青枠を直接調整します。</div>
+ <div class="notice">4つの丸をLCD面の四隅へ合わせてください。V22では補正後のLCD全体を1枚で表示し、その上で7個の青枠を直接調整します。認識は学習データを使わず、切り出した数字の黒い形状を直接解析します。</div>
 </div>
 
 <div class="card">
@@ -137,7 +137,7 @@ const PAT={
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
 };
 
-const PRESET_KEY="bp_hem7271t_digit_preset_v21";
+const PRESET_KEY="bp_hem7271t_digit_preset_v22";
 const DEFAULT_DIGIT_BOXES={
  sys:[
   {id:"s1",label:"SYS1",x:.17,y:.18,w:.12,h:.31},
@@ -407,46 +407,236 @@ function refineDigitCrop(c){
  return {canvas:out,refine:{x1:mx,y1:my,x2:c.width-mx,y2:c.height-my,mode:"preset-v21-full-lcd"}};
 }
 
-function meanRegion(diff,w,h,rect){
- const [x1,y1,x2,y2]=rect;let s=0,n=0;
- for(let y=Math.floor(y1*h);y<Math.ceil(y2*h);y++){
-  for(let x=Math.floor(x1*w);x<Math.ceil(x2*w);x++){
-   s+=diff[y*w+x];n++;
-  }
+
+function toGray(c){
+ const ctx=c.getContext("2d",{willReadFrequently:true});
+ const im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
+ const g=new Float32Array(c.width*c.height);
+ for(let i=0,j=0;i<d.length;i+=4,j++){
+   g[j]=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+ }
+ return {g,w:c.width,h:c.height};
+}
+
+function localContrastMask(c){
+ // V22: no learned templates, no fixed 7-point probes.
+ // Build a binary mask of dark LCD strokes using local background subtraction.
+ const {g,w,h}=toGray(c);
+ const bg=boxBlur(g,w,h,5);
+ const diff=new Float32Array(g.length);
+ for(let i=0;i<g.length;i++) diff[i]=Math.max(0,bg[i]-g[i]);
+
+ const vals=Array.from(diff).sort((a,b)=>a-b);
+ const q=(p)=>vals[Math.min(vals.length-1,Math.floor(vals.length*p))];
+ const th=Math.max(1.0,q(.72));
+
+ const mask=new Uint8Array(diff.length);
+ for(let i=0;i<diff.length;i++) mask[i]=diff[i]>=th?1:0;
+
+ return {mask,diff,w,h,th};
+}
+
+function regionDensity(mask,w,h,x1,y1,x2,y2){
+ let s=0,n=0;
+ const X1=Math.max(0,Math.floor(x1*w)), X2=Math.min(w,Math.ceil(x2*w));
+ const Y1=Math.max(0,Math.floor(y1*h)), Y2=Math.min(h,Math.ceil(y2*h));
+ for(let y=Y1;y<Y2;y++){
+   for(let x=X1;x<X2;x++){ s+=mask[y*w+x]; n++; }
  }
  return n?s/n:0;
 }
-const ZONES=[
- [.20,.03,.80,.18],[.67,.10,.96,.47],[.67,.53,.96,.90],
- [.20,.82,.80,.98],[.04,.53,.33,.90],[.04,.10,.33,.47],[.20,.42,.80,.60]
-];
+
+function connectedComponents(mask,w,h){
+ const seen=new Uint8Array(mask.length);
+ const comps=[];
+ const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+ for(let y=0;y<h;y++){
+   for(let x=0;x<w;x++){
+     const idx=y*w+x;
+     if(!mask[idx]||seen[idx])continue;
+     let stack=[idx],area=0,minx=x,maxx=x,miny=y,maxy=y;
+     seen[idx]=1;
+     while(stack.length){
+       const cur=stack.pop(), cy=Math.floor(cur/w), cx=cur-cy*w;
+       area++; minx=Math.min(minx,cx); maxx=Math.max(maxx,cx); miny=Math.min(miny,cy); maxy=Math.max(maxy,cy);
+       for(const [dx,dy] of dirs){
+         const nx=cx+dx,ny=cy+dy;
+         if(nx<0||nx>=w||ny<0||ny>=h)continue;
+         const ni=ny*w+nx;
+         if(mask[ni]&&!seen[ni]){seen[ni]=1;stack.push(ni)}
+       }
+     }
+     if(area>=Math.max(3,w*h*.0015)){
+       comps.push({area,minx,maxx,miny,maxy,width:maxx-minx+1,height:maxy-miny+1});
+     }
+   }
+ }
+ comps.sort((a,b)=>b.area-a.area);
+ return comps;
+}
+
+function occupancyProfile(mask,w,h){
+ const rows=new Float32Array(h),cols=new Float32Array(w);
+ for(let y=0;y<h;y++){
+   let rs=0;
+   for(let x=0;x<w;x++){
+     const v=mask[y*w+x];
+     rs+=v; cols[x]+=v;
+   }
+   rows[y]=rs/w;
+ }
+ for(let x=0;x<w;x++) cols[x]/=h;
+ return {rows,cols};
+}
+
+function bandMean(arr,a,b){
+ let s=0,n=0;
+ const i1=Math.max(0,Math.floor(a*arr.length));
+ const i2=Math.min(arr.length,Math.ceil(b*arr.length));
+ for(let i=i1;i<i2;i++){s+=arr[i];n++}
+ return n?s/n:0;
+}
+
+function extractShapeFeatures(c){
+ const {mask,w,h}=localContrastMask(c);
+ const comps=connectedComponents(mask,w,h);
+ const {rows,cols}=occupancyProfile(mask,w,h);
+
+ // broad structural bands; these are not single "segment points".
+ const top=bandMean(rows,.05,.25);
+ const mid=bandMean(rows,.38,.62);
+ const bot=bandMean(rows,.75,.95);
+ const leftTop=regionDensity(mask,w,h,.02,.10,.38,.48);
+ const rightTop=regionDensity(mask,w,h,.62,.10,.98,.48);
+ const leftBot=regionDensity(mask,w,h,.02,.52,.38,.92);
+ const rightBot=regionDensity(mask,w,h,.62,.52,.98,.92);
+
+ const upper=regionDensity(mask,w,h,.05,.05,.95,.48);
+ const lower=regionDensity(mask,w,h,.05,.52,.95,.95);
+ const centerLeft=regionDensity(mask,w,h,.05,.30,.50,.70);
+ const centerRight=regionDensity(mask,w,h,.50,.30,.95,.70);
+
+ const total=regionDensity(mask,w,h,0,0,1,1);
+ const main=comps[0]||{area:0,width:0,height:0,minx:0,maxx:0,miny:0,maxy:0};
+ const compCount=comps.length;
+
+ return {
+   top,mid,bot,leftTop,rightTop,leftBot,rightBot,
+   upper,lower,centerLeft,centerRight,total,
+   compCount,
+   mainAspect: main.height?main.width/main.height:0,
+   comps
+ };
+}
+
+function scoreShapeDigit(f,d){
+ // Shape rules derived from the actual geometry of seven-segment numerals,
+ // but based on broad stroke presence, component structure and symmetry rather
+ // than seven fixed sample points.
+ const on=.12, strong=.18, off=.09;
+ const H=(v,t=on)=>v>=t;
+ const L=(v,t=off)=>v<=t;
+
+ let s=0;
+ const add=(cond,w=1)=>{s+=cond?w:-w};
+
+ switch(d){
+  case 0:
+   add(H(f.top),2); add(H(f.bot),2); add(L(f.mid,.11),2);
+   add(H(f.leftTop),1.4); add(H(f.rightTop),1.4);
+   add(H(f.leftBot),1.4); add(H(f.rightBot),1.4);
+   break;
+  case 1:
+   add(L(f.top,.13),1.2); add(L(f.mid,.13),1.2); add(L(f.bot,.13),1.2);
+   add(L(f.leftTop,.10),1.5); add(L(f.leftBot,.10),1.5);
+   add(H(f.rightTop,.10),2); add(H(f.rightBot,.10),2);
+   break;
+  case 2:
+   add(H(f.top),2); add(H(f.mid),2); add(H(f.bot),2);
+   add(L(f.leftTop,.11),1.5); add(H(f.rightTop,.10),1.6);
+   add(H(f.leftBot,.10),1.6); add(L(f.rightBot,.11),1.5);
+   break;
+  case 3:
+   add(H(f.top),2); add(H(f.mid),2); add(H(f.bot),2);
+   add(L(f.leftTop,.11),1.5); add(H(f.rightTop,.10),1.5);
+   add(L(f.leftBot,.11),1.5); add(H(f.rightBot,.10),1.5);
+   break;
+  case 4:
+   add(L(f.top,.13),1.3); add(H(f.mid),2); add(L(f.bot,.13),1.3);
+   add(H(f.leftTop,.10),1.5); add(H(f.rightTop,.10),1.5);
+   add(L(f.leftBot,.11),1.5); add(H(f.rightBot,.10),1.5);
+   break;
+  case 5:
+   add(H(f.top),2); add(H(f.mid),2); add(H(f.bot),2);
+   add(H(f.leftTop,.10),1.5); add(L(f.rightTop,.11),1.5);
+   add(L(f.leftBot,.11),1.5); add(H(f.rightBot,.10),1.5);
+   break;
+  case 6:
+   add(H(f.top),2); add(H(f.mid),2); add(H(f.bot),2);
+   add(H(f.leftTop,.10),1.5); add(L(f.rightTop,.11),1.2);
+   add(H(f.leftBot,.10),1.5); add(H(f.rightBot,.10),1.5);
+   break;
+  case 7:
+   add(H(f.top),2); add(L(f.mid,.13),1.3); add(L(f.bot,.13),1.3);
+   add(L(f.leftTop,.11),1.5); add(H(f.rightTop,.10),1.6);
+   add(L(f.leftBot,.11),1.5); add(H(f.rightBot,.10),1.6);
+   break;
+  case 8:
+   add(H(f.top),1.7); add(H(f.mid),1.7); add(H(f.bot),1.7);
+   add(H(f.leftTop,.10),1.2); add(H(f.rightTop,.10),1.2);
+   add(H(f.leftBot,.10),1.2); add(H(f.rightBot,.10),1.2);
+   break;
+  case 9:
+   add(H(f.top),2); add(H(f.mid),2); add(H(f.bot),1.3);
+   add(H(f.leftTop,.10),1.5); add(H(f.rightTop,.10),1.5);
+   add(L(f.leftBot,.11),1.2); add(H(f.rightBot,.10),1.5);
+   break;
+ }
+
+ // Additional shape priors.
+ if(d===1){
+   add(f.total<.32,1.0);
+   add(f.centerRight>=f.centerLeft,0.8);
+ }
+ if(d===8) add(f.total>.20,0.8);
+ if(d===0) add(f.mid<Math.max(f.top,f.bot),0.8);
+
+ return s;
+}
 
 function classifyFixedDigit(box){
  const raw=cropFixedDigit(box);
- const refined=refineDigitCrop(raw);
- const {diff,w,h}=diffFor(refined.canvas);
- const vals=ZONES.map(z=>meanRegion(diff,w,h,z));
- const max=Math.max(...vals),min=Math.min(...vals);
- const norm=vals.map(v=>max>min?(v-min)/(max-min):0);
 
- let cand=[];
- for(const [digit,pat] of Object.entries(PAT)){
-   let err=0;
-   for(let i=0;i<7;i++){
-     const target=pat[i]?0.78:0.15;
-     err+=(norm[i]-target)*(norm[i]-target);
-   }
-   cand.push({digit:Number(digit),err});
- }
- cand.sort((a,b)=>a.err-b.err);
- const margin=cand[1].err-cand[0].err;
- const confidence=Math.max(0,Math.min(1,margin/0.30));
+ // V22: saved crop is authoritative, no learned data.
+ const norm=document.createElement("canvas");
+ norm.width=100; norm.height=170;
+ const nctx=norm.getContext("2d");
+ nctx.fillStyle="#fff"; nctx.fillRect(0,0,norm.width,norm.height);
+
+ // tiny safety margin only
+ const mx=Math.round(raw.width*.015), my=Math.round(raw.height*.015);
+ nctx.drawImage(raw,mx,my,Math.max(1,raw.width-2*mx),Math.max(1,raw.height-2*my),0,0,norm.width,norm.height);
+
+ const f=extractShapeFeatures(norm);
+ const cand=[];
+ for(let d=0;d<=9;d++) cand.push({digit:d,score:scoreShapeDigit(f,d)});
+ cand.sort((a,b)=>b.score-a.score);
+
+ const best=cand[0], second=cand[1];
+ const margin=best.score-second.score;
+
+ // Require a real margin, but not too strict.
+ const confidence=Math.max(0,Math.min(1,(margin+1.0)/4.0));
+ const n=(margin>=0.6)?best.digit:null;
 
  return {
-   n:confidence>=.35?cand[0].digit:null,
-   confidence,norm,vals,
-   canvas:refined.canvas,
-   refine:refined.refine
+   n,confidence,
+   score:best.score,
+   second:second.score,
+   margin,
+   features:f,
+   canvas:norm,
+   refine:{mode:"shape-v22"}
  };
 }
 
@@ -487,14 +677,16 @@ $("readBtn").onclick=()=>{
  show(P,"rPulse","pulse",35,200);
 
  const fmt=(name,obj)=>name+" "+obj.rs.map(r=>
-   `${r.n??"?"} conf=${r.confidence.toFixed(2)} norm=${r.norm.map(v=>v.toFixed(2)).join(",")} crop=${r.refine.mode}`
+   `${r.n??"?"} conf=${r.confidence.toFixed(2)} margin=${r.margin.toFixed(2)} `+
+   `shape=top:${r.features.top.toFixed(2)},mid:${r.features.mid.toFixed(2)},bot:${r.features.bot.toFixed(2)},`+
+   `LT:${r.features.leftTop.toFixed(2)},RT:${r.features.rightTop.toFixed(2)},LB:${r.features.leftBot.toFixed(2)},RB:${r.features.rightBot.toFixed(2)} crop=shape-v22`
  ).join(" / ");
  $("debug").textContent=fmt("SYS",S)+"\n"+fmt("DIA",D)+"\n"+fmt("PULSE",P);
 
  if(S.value!==null&&D.value!==null&&P.value!==null&&S.value>D.value){
   $("status").textContent=`HEM-7271T専用判定：${S.value}/${D.value}、脈拍 ${P.value}。写真と照合してください。`;
  }else{
-  $("status").textContent="一部の桁で信頼度が不足しています。ログを送ってください。";
+  $("status").textContent="一部の桁で形状判定の信頼度が不足しています。青枠が合っている場合はログを送ってください。";
  }
 };
 
