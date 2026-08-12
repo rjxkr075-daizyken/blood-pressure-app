@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v31</title>
+<title>HEM-7271T 血圧フォト記録 v32</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -48,7 +48,7 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v31</h1>
+<h1>HEM-7271T 血圧フォト記録 v32</h1>
 <div class="sub">濃いLCDセグメント分離 + 形状判定（V23修正版2）</div>
 
 <div class="card">
@@ -76,7 +76,7 @@ svg{width:100%;height:230px;display:block}
  <div id="presetStage">
    <canvas id="presetCanvas" width="900" height="700"></canvas>
  </div>
- <div class="presetHint">V31ではLCD四隅の補正後、SYS・DIA・PULSEそれぞれの広い探索エリア内だけで数字群を検出し、その数字群の中だけを3桁・2桁・2桁に分割します。左側の印刷文字と右側の圧力バーは探索対象から除外します。</div>
+ <div class="presetHint">V32では行を等分しません。補正後LCD内の濃い7セグメント形状を連結成分として抽出し、近接するセグメントを1個の数字へ統合して、数字本体の外接矩形を青枠にします。その後、位置関係からSYS3桁・DIA2桁・PULSE2桁へ割り当てます。</div>
  <div class="row" style="margin-top:10px">
   <button id="autoBoxesBtn" class="secondary" disabled>桁位置を自動検出</button>
   <button id="readBtn" disabled>HEM-7271T専用解析</button>
@@ -140,7 +140,7 @@ const PAT={
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
 };
 
-const PRESET_KEY="bp_hem7271t_digit_preset_v31";
+const PRESET_KEY="bp_hem7271t_digit_preset_v32";
 const DEFAULT_DIGIT_BOXES={
  sys:[
   {id:"s1",label:"SYS1",x:.17,y:.18,w:.12,h:.31},
@@ -283,12 +283,12 @@ window.addEventListener("resize",()=>positionPreset());
 
 $("savePresetBtn").onclick=()=>{
  localStorage.setItem(PRESET_KEY,JSON.stringify(DIGIT_BOXES)); V26_MANUAL_OVERRIDE=true;
- $("status").textContent="V31桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
+ $("status").textContent="V32桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
 };
 $("resetPresetBtn").onclick=()=>{
  DIGIT_BOXES=structuredClone(DEFAULT_DIGIT_BOXES);
  buildPresetOverlay();
- $("status").textContent="桁位置をV31数字群検出位置へ戻しました。";
+ $("status").textContent="桁位置をV32数字本体検出位置へ戻しました。";
 };
 
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
@@ -1031,239 +1031,261 @@ function splitDigitsV26(mask,w,row,count){
  return boxes;
 }
 function autoDetectDigitBoxesV26(){
- if(!rc || !rc.width || !rc.height)throw new Error("先に液晶を補正してください。");
+ if(!rc || !rc.width || !rc.height) throw new Error("先に液晶を補正してください。");
 
  const W=rc.width,H=rc.height;
  const im=rctx.getImageData(0,0,W,H),d=im.data;
-
- const lumAt=(x,y)=>{
+ const lum=(x,y)=>{
    const i=(y*W+x)*4;
    return .299*d[i]+.587*d[i+1]+.114*d[i+2];
  };
 
- const smooth=(arr,rad)=>{
-   const out=new Float32Array(arr.length);
-   for(let i=0;i<arr.length;i++){
-     let s=0,n=0;
-     for(let j=Math.max(0,i-rad);j<=Math.min(arr.length-1,i+rad);j++){s+=arr[j];n++}
-     out[i]=n?s/n:0;
+ // LCD number field only.
+ // Left printed labels and right pressure bar are excluded.
+ const rx0=Math.round(W*.16), rx1=Math.round(W*.67);
+ const ry0=Math.round(H*.12), ry1=Math.round(H*.93);
+
+ // Estimate threshold from the number field itself.
+ const samp=[];
+ for(let y=ry0;y<ry1;y+=2){
+   for(let x=rx0;x<rx1;x+=2) samp.push(lum(x,y));
+ }
+ samp.sort((a,b)=>a-b);
+ const q12=samp[Math.floor(samp.length*.12)] ?? 80;
+ const q45=samp[Math.floor(samp.length*.45)] ?? 150;
+ const thr=Math.max(65,Math.min(145,q12+(q45-q12)*.38));
+
+ const bw=rx1-rx0,bh=ry1-ry0;
+ const mask=new Uint8Array(bw*bh);
+
+ for(let y=0;y<bh;y++){
+   for(let x=0;x<bw;x++){
+     mask[y*bw+x] = lum(rx0+x,ry0+y)<thr ? 1 : 0;
    }
-   return out;
- };
-
- // V31:
- // 1) Search only inside three broad HEM-7271T digit zones.
- // 2) Find one connected "number group" per row.
- // 3) Split only inside that group.
- // The left printed labels and the right pressure bar are deliberately excluded.
- const zones={
-   sys:{x0:.18,x1:.63,y0:.16,y1:.43,count:3},
-   dia:{x0:.25,x1:.63,y0:.41,y1:.68,count:2},
-   pulse:{x0:.34,x1:.65,y0:.68,y1:.91,count:2}
- };
-
- function findGroup(zone,name){
-   const xa=Math.round(W*zone.x0), xb=Math.round(W*zone.x1);
-   const ya=Math.round(H*zone.y0), yb=Math.round(H*zone.y1);
-
-   // Robust dark threshold estimated from the zone itself.
-   const vals=[];
-   for(let y=ya;y<yb;y+=2){
-     for(let x=xa;x<xb;x+=2) vals.push(lumAt(x,y));
-   }
-   vals.sort((a,b)=>a-b);
-   const q20=vals[Math.max(0,Math.floor(vals.length*.20))] ?? 90;
-   const q50=vals[Math.max(0,Math.floor(vals.length*.50))] ?? 150;
-   const darkThr=Math.max(70,Math.min(145, q20 + (q50-q20)*.45));
-
-   const col=new Float32Array(W);
-   const row=new Float32Array(H);
-
-   for(let y=ya;y<yb;y++){
-     let rn=0;
-     for(let x=xa;x<xb;x++){
-       if(lumAt(x,y)<darkThr){
-         col[x]+=1;
-         rn++;
-       }
-     }
-     row[y]=rn/(xb-xa);
-   }
-
-   for(let x=xa;x<xb;x++) col[x]/=(yb-ya);
-
-   const cs=smooth(col,Math.max(1,Math.round(W*.004)));
-   const rs=smooth(row,Math.max(1,Math.round(H*.005)));
-
-   let cp=0,rp=0;
-   for(let x=xa;x<xb;x++)cp=Math.max(cp,cs[x]);
-   for(let y=ya;y<yb;y++)rp=Math.max(rp,rs[y]);
-
-   const cthr=Math.max(.012,cp*.18);
-   const rthr=Math.max(.012,rp*.18);
-
-   // Determine the vertical number-band inside the broad row zone.
-   let top=-1,bottom=-1;
-   for(let y=ya;y<yb;y++){ if(rs[y]>=rthr){top=y;break} }
-   for(let y=yb-1;y>=ya;y--){ if(rs[y]>=rthr){bottom=y;break} }
-   if(top<0||bottom<0||bottom<=top){
-     top=ya; bottom=yb-1;
-   }
-
-   // Recompute column density only inside detected number-band.
-   const col2=new Float32Array(W);
-   for(let x=xa;x<xb;x++){
-     let n=0;
-     for(let y=top;y<=bottom;y++)if(lumAt(x,y)<darkThr)n++;
-     col2[x]=n/Math.max(1,bottom-top+1);
-   }
-   const cs2=smooth(col2,Math.max(1,Math.round(W*.004)));
-   let cp2=0;
-   for(let x=xa;x<xb;x++)cp2=Math.max(cp2,cs2[x]);
-   const cthr2=Math.max(.012,cp2*.16);
-
-   // Active runs in x.
-   const runs=[];
-   let on=false,r0=0;
-   for(let x=xa;x<xb;x++){
-     const active=cs2[x]>=cthr2;
-     if(active&&!on){r0=x;on=true}
-     if((!active||x===xb-1)&&on){
-       const r1=(active&&x===xb-1)?x:x-1;
-       if(r1-r0>=Math.max(2,W*.006))runs.push({x0:r0,x1:r1});
-       on=false;
-     }
-   }
-
-   // Merge tiny gaps caused by segment separation inside one digit.
-   const merged=[];
-   const mergeGap=W*(name==="sys"?.018:.016);
-   for(const r of runs){
-     const last=merged[merged.length-1];
-     if(last && r.x0-last.x1<mergeGap) last.x1=r.x1;
-     else merged.push({...r});
-   }
-
-   // Score candidate clusters of adjacent runs. We want the main number group,
-   // not isolated noise. The group is expected to be left-of-center in each zone.
-   let best=null,bestScore=-1e9;
-   for(let i=0;i<merged.length;i++){
-     for(let j=i;j<merged.length;j++){
-       const gx0=merged[i].x0, gx1=merged[j].x1;
-       const gw=gx1-gx0+1;
-       if(gw<W*.06 || gw>W*.42)continue;
-
-       let ink=0;
-       for(let x=gx0;x<=gx1;x++)ink+=cs2[x];
-       const cx=((gx0+gx1)/2)/W;
-       const targetCx = name==="sys" ? .39 : (name==="dia" ? .43 : .50);
-       const widthTarget = name==="sys" ? .26 : .19;
-       const score = ink*2
-         - Math.abs(cx-targetCx)*3.5
-         - Math.abs(gw/W-widthTarget)*2.0
-         - Math.max(0,(j-i+1)-zone.count)*.15;
-       if(score>bestScore){
-         bestScore=score;
-         best={x0:gx0,x1:gx1,y0:top,y1:bottom,darkThr};
-       }
-     }
-   }
-
-   // Fallback: use measured dark span in the zone.
-   if(!best){
-     let minX=xb,maxX=xa;
-     for(let x=xa;x<xb;x++){
-       if(cs2[x]>=cthr2){minX=Math.min(minX,x);maxX=Math.max(maxX,x)}
-     }
-     if(maxX<=minX){
-       minX=Math.round(W*(name==="sys"?.24:(name==="dia"?.31:.39)));
-       maxX=Math.round(W*(name==="sys"?.59:(name==="dia"?.58:.62)));
-     }
-     best={x0:minX,x1:maxX,y0:top,y1:bottom,darkThr};
-   }
-
-   // Slight expansion so segments are not clipped.
-   const px=Math.round(W*.010);
-   const py=Math.round(H*.012);
-   best.x0=Math.max(xa,best.x0-px);
-   best.x1=Math.min(xb-1,best.x1+px);
-   best.y0=Math.max(ya,best.y0-py);
-   best.y1=Math.min(yb-1,best.y1+py);
-
-   return best;
  }
 
- function splitGroup(group,count,name){
-   const {x0,x1,y0,y1,darkThr}=group;
-   const col=new Float32Array(W);
-   for(let x=x0;x<=x1;x++){
-     let n=0;
-     for(let y=y0;y<=y1;y++)if(lumAt(x,y)<darkThr)n++;
-     col[x]=n/Math.max(1,y1-y0+1);
+ // Light morphology: connect small breaks inside LCD segments without
+ // joining neighboring digits.
+ const tmp=new Uint8Array(mask.length);
+ const radX=Math.max(1,Math.round(W*.003));
+ const radY=Math.max(1,Math.round(H*.002));
+
+ for(let y=0;y<bh;y++){
+   for(let x=0;x<bw;x++){
+     let on=0;
+     for(let dx=-radX;dx<=radX && !on;dx++){
+       const xx=x+dx;
+       if(xx>=0&&xx<bw&&mask[y*bw+xx]) on=1;
+     }
+     tmp[y*bw+x]=on;
    }
-   const cs=smooth(col,Math.max(1,Math.round(W*.003)));
+ }
+ const mor=new Uint8Array(mask.length);
+ for(let y=0;y<bh;y++){
+   for(let x=0;x<bw;x++){
+     let on=0;
+     for(let dy=-radY;dy<=radY && !on;dy++){
+       const yy=y+dy;
+       if(yy>=0&&yy<bh&&tmp[yy*bw+x]) on=1;
+     }
+     mor[y*bw+x]=on;
+   }
+ }
 
-   let peak=0;
-   for(let x=x0;x<=x1;x++)peak=Math.max(peak,cs[x]);
-   const thr=Math.max(.010,peak*.12);
+ // Connected components of dark LCD pieces.
+ const seen=new Uint8Array(mor.length);
+ const comps=[];
+ const stackX=new Int32Array(mor.length);
+ const stackY=new Int32Array(mor.length);
 
-   // Build occupancy curve, then find valleys between digits.
-   const span=x1-x0+1;
-   const minGap=Math.max(2,Math.round(span*.05));
-   const separators=[];
+ for(let sy=0;sy<bh;sy++){
+   for(let sx=0;sx<bw;sx++){
+     const si=sy*bw+sx;
+     if(!mor[si]||seen[si]) continue;
 
-   if(count>1){
-     // Expected separators prevent the algorithm from wandering to neighboring digits.
-     for(let k=1;k<count;k++){
-       const expected=x0+span*k/count;
-       const search=Math.round(span*.16);
-       let bestX=Math.round(expected),bestV=Infinity;
-       for(let x=Math.max(x0+minGap,Math.round(expected-search));
-           x<=Math.min(x1-minGap,Math.round(expected+search));x++){
-         const v=cs[x];
-         if(v<bestV){bestV=v;bestX=x}
+     let sp=0;
+     stackX[sp]=sx; stackY[sp]=sy; sp++;
+     seen[si]=1;
+     let minX=sx,maxX=sx,minY=sy,maxY=sy,n=0;
+
+     while(sp){
+       sp--;
+       const x=stackX[sp],y=stackY[sp];
+       n++;
+       if(x<minX)minX=x;if(x>maxX)maxX=x;
+       if(y<minY)minY=y;if(y>maxY)maxY=y;
+
+       const nb=[[x-1,y],[x+1,y],[x,y-1],[x,y+1]];
+       for(const [xx,yy] of nb){
+         if(xx<0||xx>=bw||yy<0||yy>=bh)continue;
+         const ii=yy*bw+xx;
+         if(mor[ii]&&!seen[ii]){
+           seen[ii]=1;
+           stackX[sp]=xx;stackY[sp]=yy;sp++;
+         }
        }
-       separators.push(bestX);
+     }
+
+     const cw=maxX-minX+1,ch=maxY-minY+1;
+     // Keep segment-like pieces, reject specks and long border/print artifacts.
+     if(n>=Math.max(8,W*H*.00002) &&
+        cw>=W*.008 && ch>=H*.012 &&
+        cw<=W*.20 && ch<=H*.30){
+       comps.push({
+         x0:minX+rx0,x1:maxX+rx0,
+         y0:minY+ry0,y1:maxY+ry0,
+         n
+       });
+     }
+   }
+ }
+
+ // Assign pieces to one of the three numeric rows by vertical center.
+ const rows={
+   sys:{cy:.30,pieces:[],count:3},
+   dia:{cy:.56,pieces:[],count:2},
+   pulse:{cy:.79,pieces:[],count:2}
+ };
+
+ for(const c of comps){
+   const cy=((c.y0+c.y1)/2)/H;
+   let best=null,dist=1e9;
+   for(const [name,r] of Object.entries(rows)){
+     const dd=Math.abs(cy-r.cy);
+     if(dd<dist){dist=dd;best=name}
+   }
+   if(dist<.19) rows[best].pieces.push(c);
+ }
+
+ function clusterDigits(name,row){
+   const pieces=row.pieces.slice().sort((a,b)=>a.x0-b.x0);
+   if(!pieces.length) return [];
+
+   // Merge segment pieces into digit candidates.
+   // Segments belonging to one digit may have large vertical gaps but strongly overlap in x.
+   let groups=[];
+   for(const c of pieces){
+     const cx=(c.x0+c.x1)/2;
+     let best=-1,bestScore=-1e9;
+     for(let i=0;i<groups.length;i++){
+       const g=groups[i];
+       const gx0=g.x0,gx1=g.x1;
+       const overlap=Math.max(0,Math.min(gx1,c.x1)-Math.max(gx0,c.x0)+1);
+       const minw=Math.max(1,Math.min(gx1-gx0+1,c.x1-c.x0+1));
+       const ov=overlap/minw;
+       const gcx=(gx0+gx1)/2;
+       const dx=Math.abs(cx-gcx)/W;
+       const score=ov*3-dx*10;
+       if((ov>.20 || dx<.035) && score>bestScore){
+         bestScore=score;best=i;
+       }
+     }
+     if(best<0){
+       groups.push({...c,pieces:[c]});
+     }else{
+       const g=groups[best];
+       g.x0=Math.min(g.x0,c.x0);g.x1=Math.max(g.x1,c.x1);
+       g.y0=Math.min(g.y0,c.y0);g.y1=Math.max(g.y1,c.y1);
+       g.n+=c.n;g.pieces.push(c);
      }
    }
 
-   const bounds=[x0,...separators,x1];
-   const boxes=[];
-
-   for(let i=0;i<count;i++){
-     let a=bounds[i],b=bounds[i+1];
-     if(i>0)a+=1;
-
-     // Tighten each slot to actual dark pixels.
-     let left=-1,right=-1;
-     for(let x=a;x<=b;x++){ if(cs[x]>=thr){left=x;break} }
-     for(let x=b;x>=a;x--){ if(cs[x]>=thr){right=x;break} }
-
-     if(left<0||right<0||right<=left){
-       left=a;right=b;
+   // Second pass: join fragments with almost identical x-center.
+   let changed=true;
+   while(changed){
+     changed=false;
+     outer:
+     for(let i=0;i<groups.length;i++){
+       for(let j=i+1;j<groups.length;j++){
+         const a=groups[i],b=groups[j];
+         const ac=(a.x0+a.x1)/2,bc=(b.x0+b.x1)/2;
+         const dx=Math.abs(ac-bc)/W;
+         const overlap=Math.max(0,Math.min(a.x1,b.x1)-Math.max(a.x0,b.x0)+1);
+         const minw=Math.max(1,Math.min(a.x1-a.x0+1,b.x1-b.x0+1));
+         if(dx<.025 || overlap/minw>.35){
+           const m={
+             x0:Math.min(a.x0,b.x0),x1:Math.max(a.x1,b.x1),
+             y0:Math.min(a.y0,b.y0),y1:Math.max(a.y1,b.y1),
+             n:a.n+b.n,pieces:[...(a.pieces||[]),...(b.pieces||[])]
+           };
+           groups.splice(j,1);groups.splice(i,1,m);
+           changed=true;break outer;
+         }
+       }
      }
+   }
 
-     const pad=Math.round(W*.010);
-     left=Math.max(x0,left-pad);
-     right=Math.min(x1,right+pad);
+   // Filter implausible groups.
+   groups=groups.filter(g=>{
+     const w=(g.x1-g.x0+1)/W,h=(g.y1-g.y0+1)/H;
+     return w>=.012 && w<=.16 && h>=.05 && h<=.31;
+   });
 
-     boxes.push({
-       x:left/W,
-       y:y0/H,
-       w:(right-left+1)/W,
-       h:(y1-y0+1)/H
+   // Sort and choose the strongest sequence matching expected count.
+   groups.sort((a,b)=>a.x0-b.x0);
+
+   // If too many, score contiguous subsets by darkness + expected spacing.
+   if(groups.length>row.count){
+     let best=null,bestScore=-1e9;
+     for(let i=0;i<=groups.length-row.count;i++){
+       const sub=groups.slice(i,i+row.count);
+       const first=sub[0],last=sub[sub.length-1];
+       const span=(last.x1-first.x0+1)/W;
+       const targetSpan=name==="sys"?.30:.20;
+       const ink=sub.reduce((s,g)=>s+g.n,0)/(W*H);
+       let gaps=0;
+       for(let k=0;k<sub.length-1;k++){
+         gaps+=Math.max(0,sub[k+1].x0-sub[k].x1)/W;
+       }
+       const score=ink*100 - Math.abs(span-targetSpan)*4 - gaps*.5;
+       if(score>bestScore){bestScore=score;best=sub}
+     }
+     if(best)groups=best;
+   }
+
+   // If not enough digit groups, fall back only inside the measured row pieces.
+   if(groups.length!==row.count){
+     let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+     for(const c of pieces){
+       minX=Math.min(minX,c.x0);maxX=Math.max(maxX,c.x1);
+       minY=Math.min(minY,c.y0);maxY=Math.max(maxY,c.y1);
+     }
+     if(!isFinite(minX)){
+       const fb={
+         sys:[.22,.60,.16,.43],
+         dia:[.29,.60,.42,.69],
+         pulse:[.38,.63,.69,.90]
+       }[name];
+       minX=W*fb[0];maxX=W*fb[1];minY=H*fb[2];maxY=H*fb[3];
+     }
+     groups=[];
+     const span=maxX-minX+1;
+     for(let i=0;i<row.count;i++){
+       groups.push({
+         x0:minX+span*i/row.count,
+         x1:minX+span*(i+1)/row.count,
+         y0:minY,y1:maxY,n:0,pieces:[]
+       });
+     }
+   }
+
+   // Expand each true digit bounding box slightly.
+   const padX=Math.round(W*.012);
+   const padY=Math.round(H*.014);
+   return groups
+     .sort((a,b)=>a.x0-b.x0)
+     .map(g=>{
+       const x0=Math.max(rx0,Math.round(g.x0-padX));
+       const x1=Math.min(rx1-1,Math.round(g.x1+padX));
+       const y0=Math.max(ry0,Math.round(g.y0-padY));
+       const y1=Math.min(ry1-1,Math.round(g.y1+padY));
+       return {x:x0/W,y:y0/H,w:(x1-x0+1)/W,h:(y1-y0+1)/H};
      });
-   }
-   return boxes;
  }
 
- const gSys=findGroup(zones.sys,"sys");
- const gDia=findGroup(zones.dia,"dia");
- const gPulse=findGroup(zones.pulse,"pulse");
-
- const sys=splitGroup(gSys,3,"sys");
- const dia=splitGroup(gDia,2,"dia");
- const pulse=splitGroup(gPulse,2,"pulse");
+ const sys=clusterDigits("sys",rows.sys);
+ const dia=clusterDigits("dia",rows.dia);
+ const pulse=clusterDigits("pulse",rows.pulse);
 
  DIGIT_BOXES={
    sys:sys.map((b,i)=>({id:"s"+(i+1),label:"SYS"+(i+1),...b})),
@@ -1273,17 +1295,26 @@ function autoDetectDigitBoxesV26(){
 
  buildPresetOverlay();
 
- V31_GROUP_DIAG={
-   sys:{x:[(gSys.x0/W).toFixed(3),(gSys.x1/W).toFixed(3)],y:[(gSys.y0/H).toFixed(3),(gSys.y1/H).toFixed(3)],thr:gSys.darkThr.toFixed(1)},
-   dia:{x:[(gDia.x0/W).toFixed(3),(gDia.x1/W).toFixed(3)],y:[(gDia.y0/H).toFixed(3),(gDia.y1/H).toFixed(3)],thr:gDia.darkThr.toFixed(1)},
-   pulse:{x:[(gPulse.x0/W).toFixed(3),(gPulse.x1/W).toFixed(3)],y:[(gPulse.y0/H).toFixed(3),(gPulse.y1/H).toFixed(3)],thr:gPulse.darkThr.toFixed(1)}
+ V32_OBJECT_DIAG={
+   threshold:thr.toFixed(1),
+   components:comps.length,
+   rowPieces:{
+     sys:rows.sys.pieces.length,
+     dia:rows.dia.pieces.length,
+     pulse:rows.pulse.pieces.length
+   },
+   boxes:{
+     sys:sys.map(b=>[b.x.toFixed(3),b.y.toFixed(3),b.w.toFixed(3),b.h.toFixed(3)]),
+     dia:dia.map(b=>[b.x.toFixed(3),b.y.toFixed(3),b.w.toFixed(3),b.h.toFixed(3)]),
+     pulse:pulse.map(b=>[b.x.toFixed(3),b.y.toFixed(3),b.w.toFixed(3),b.h.toFixed(3)])
+   }
  };
 
- $("status").textContent="V31：3つの数字群を先に検出し、その内部だけで7桁を分割しました。";
+ $("status").textContent="V32：7セグメント形状を数字ごとにまとめ、数字本体の外接矩形へ青枠を配置しました。";
  return DIGIT_BOXES;
 }
 
-let V31_GROUP_DIAG=null;
+let V32_OBJECT_DIAG=null;
 
 let V26_MANUAL_OVERRIDE=false;
 $("autoBoxesBtn").onclick=()=>{
