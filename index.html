@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v24</title>
+<title>HEM-7271T 血圧フォト記録 v25</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -48,8 +48,8 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v24 修正版2</h1>
-<div class="sub">濃いLCDセグメント分離 + 数字本体トリミング + 1/7/0強化（修正版2）</div>
+<h1>HEM-7271T 血圧フォト記録 v25</h1>
+<div class="sub">濃いLCDセグメント分離 + 形状判定（V23修正版2）</div>
 
 <div class="card">
  <div class="row">
@@ -66,7 +66,7 @@ svg{width:100%;height:230px;display:block}
   <div class="handle" data-i="0"></div><div class="handle" data-i="1"></div>
   <div class="handle" data-i="2"></div><div class="handle" data-i="3"></div>
  </div>
- <div class="notice">4つの丸をLCD面の四隅へ合わせてください。V24ではLCD全体・7個の青枠・濃いLCDセグメント抽出を維持し、青枠内から数字本体へ少しだけ自動トリミングしてから判定します。1・7・0の判定も強化しています。</div>
+ <div class="notice">4つの丸をLCD面の四隅へ合わせてください。V25では補正後のLCD全体と7個の青枠はV22の方式を維持します。V23の安定した切り出しを維持し、7セグメントの並びを正しく解釈して1・7・0を形状補正します。自動トリミングは使いません。</div>
 </div>
 
 <div class="card">
@@ -138,7 +138,7 @@ const PAT={
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
 };
 
-const PRESET_KEY="bp_hem7271t_digit_preset_v24";
+const PRESET_KEY="bp_hem7271t_digit_preset_v23";
 const DEFAULT_DIGIT_BOXES={
  sys:[
   {id:"s1",label:"SYS1",x:.17,y:.18,w:.12,h:.31},
@@ -281,7 +281,7 @@ window.addEventListener("resize",()=>positionPreset());
 
 $("savePresetBtn").onclick=()=>{
  localStorage.setItem(PRESET_KEY,JSON.stringify(DIGIT_BOXES));
- $("status").textContent="V21桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
+ $("status").textContent="V25桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
 };
 $("resetPresetBtn").onclick=()=>{
  DIGIT_BOXES=structuredClone(DEFAULT_DIGIT_BOXES);
@@ -675,140 +675,30 @@ function scoreShapeDigit(f,d){
    if(f.rightBot<=f.leftBot) error+=0.35;
  }
 
-
- // V24 fixed special discrimination for the failure modes seen in V23.
- const top=Number.isFinite(f.top)?f.top:0;
- const mid=Number.isFinite(f.mid)?f.mid:0;
- const bot=Number.isFinite(f.bot)?f.bot:0;
- const leftTop=Number.isFinite(f.leftTop)?f.leftTop:0;
- const rightTop=Number.isFinite(f.rightTop)?f.rightTop:0;
- const leftBot=Number.isFinite(f.leftBot)?f.leftBot:0;
- const rightBot=Number.isFinite(f.rightBot)?f.rightBot:0;
- if(d===1){
-   // A true "1" is strongly right-sided and has almost no left-bottom stroke.
-   if(leftBot<.10) error-=0.35;
-   if(leftTop<.12) error-=0.25;
-   if(rightTop>.12 && rightBot>.12) error-=0.35;
-   if(top>.22 && mid>.22 && bot>.22) error+=0.55;
- }
- if(d===7){
-   // 7 = top + right upper/lower, with very little left side and bottom.
-   if(top>.10 && rightTop>.10 && rightBot>.10) error-=0.30;
-   if(leftTop<.14 && leftBot<.14) error-=0.35;
-   if(bot>.20) error+=0.45;
- }
- if(d===0){
-   // 0 has six outer strokes but should have a weak middle.
-   const outer=(top+bot+leftTop+rightTop+leftBot+rightBot)/6;
-   if(outer>.10 && mid<outer*.72) error-=0.45;
-   if(mid>outer*.92) error+=0.70;
- }
- if(d===8){
-   // Penalize 8 if center is not really present.
-   const outer=(top+bot+leftTop+rightTop+leftBot+rightBot)/6;
-   if(mid<outer*.78) error+=0.55;
- }
-
- return Number.isFinite(error) ? -error : -999;
-}
-
-
-function autoTrimDigit(raw){
- // V24:
- // Use the cleaned dark-segment mask only to find the bounding box of the
- // actual digit strokes inside the already user-calibrated blue box.
- // Expansion is limited so that we do not jump into neighboring digits.
- const prep=localContrastMask(raw);
- const {mask,w,h}=prep;
-
- let minx=w,miny=h,maxx=-1,maxy=-1,count=0;
- for(let y=0;y<h;y++){
-   for(let x=0;x<w;x++){
-     if(mask[y*w+x]){
-       count++;
-       if(x<minx)minx=x;if(x>maxx)maxx=x;
-       if(y<miny)miny=y;if(y>maxy)maxy=y;
-     }
-   }
- }
-
- // If segmentation is too sparse, keep the preset crop unchanged.
- if(count < Math.max(8,w*h*.006) || maxx<minx || maxy<miny){
-   return {canvas:raw,box:{x1:0,y1:0,x2:w,y2:h,mode:"preset-fallback"}};
- }
-
- const bw=maxx-minx+1,bh=maxy-miny+1;
-
- // Add controlled margins around the detected stroke body.
- // 1 needs more horizontal margin because it is narrow.
- const mx=Math.max(2,Math.round(bw*.22));
- const my=Math.max(2,Math.round(bh*.10));
-
- let x1=Math.max(0,minx-mx),x2=Math.min(w,maxx+mx+1);
- let y1=Math.max(0,miny-my),y2=Math.min(h,maxy+my+1);
-
- // Do not allow the trim to become absurdly narrow/tall.
- const minW=Math.round(w*.34), minH=Math.round(h*.55);
- if(x2-x1<minW){
-   const cx=(x1+x2)/2;
-   x1=Math.max(0,Math.round(cx-minW/2));
-   x2=Math.min(w,x1+minW);
-   x1=Math.max(0,x2-minW);
- }
- if(y2-y1<minH){
-   const cy=(y1+y2)/2;
-   y1=Math.max(0,Math.round(cy-minH/2));
-   y2=Math.min(h,y1+minH);
-   y1=Math.max(0,y2-minH);
- }
-
- const out=document.createElement("canvas");
- out.width=Math.max(1,x2-x1);
- out.height=Math.max(1,y2-y1);
- out.getContext("2d").drawImage(raw,x1,y1,x2-x1,y2-y1,0,0,out.width,out.height);
-
- return {canvas:out,box:{x1,y1,x2,y2,mode:"auto-trim-v24"}};
+ return -error;
 }
 
 function classifyFixedDigit(box){
  const raw=cropFixedDigit(box);
- const trimmed=autoTrimDigit(raw);
 
+ // V22: saved crop is authoritative, no learned data.
  const norm=document.createElement("canvas");
- norm.width=100;
- norm.height=170;
+ norm.width=100; norm.height=170;
  const nctx=norm.getContext("2d");
- nctx.fillStyle="#fff";
- nctx.fillRect(0,0,norm.width,norm.height);
+ nctx.fillStyle="#fff"; nctx.fillRect(0,0,norm.width,norm.height);
 
- // Keep a tiny margin after the body trim.
- const c=trimmed.canvas;
- const mx=Math.round(c.width*.02),my=Math.round(c.height*.02);
- nctx.drawImage(
-   c,
-   mx,my,Math.max(1,c.width-2*mx),Math.max(1,c.height-2*my),
-   0,0,norm.width,norm.height
- );
+ // tiny safety margin only
+ const mx=Math.round(raw.width*.015), my=Math.round(raw.height*.015);
+ nctx.drawImage(raw,mx,my,Math.max(1,raw.width-2*mx),Math.max(1,raw.height-2*my),0,0,norm.width,norm.height);
 
  const f=extractShapeFeatures(norm);
-
- // V24 fixed: extractShapeFeatures() exposes seven segment strengths in rel[].
- // Map them explicitly before scoreShapeDigit() uses named segment fields.
- if(Array.isArray(f.rel) && f.rel.length>=7){
-   f.top      = f.rel[0];
-   f.mid      = f.rel[1];
-   f.bot      = f.rel[2];
-   f.leftTop  = f.rel[3];
-   f.rightTop = f.rel[4];
-   f.leftBot  = f.rel[5];
-   f.rightBot = f.rel[6];
- }
  const cand=[];
  for(let d=0;d<=9;d++) cand.push({digit:d,score:scoreShapeDigit(f,d)});
  cand.sort((a,b)=>b.score-a.score);
 
- const best=cand[0],second=cand[1];
+ const best=cand[0], second=cand[1];
  const margin=best.score-second.score;
+
  const confidence=Math.max(0,Math.min(1,margin/0.55));
  const n=(margin>=0.10)?best.digit:null;
 
@@ -819,11 +709,51 @@ function classifyFixedDigit(box){
    margin,
    features:f,
    canvas:norm,
-   refine:trimmed.box
+   refine:{mode:"dark-segment-v23"}
  };
 }
+
+function v25StructuralOverride(r){
+ const a=r.features.rel;
+ // rel order:
+ // 0 top, 1 rightTop, 2 rightBot, 3 bottom,
+ // 4 leftBot, 5 leftTop, 6 middle
+ const [top,rt,rb,bot,lb,lt,mid]=a;
+ let n=r.n;
+ let reason="base";
+
+ // 1: both right strokes are dominant, while both left strokes are absent.
+ // Reflections may create top/middle/bottom ghosts, so left-side absence is decisive.
+ if(rt>=0.78 && rb>=0.70 && lb<=0.16 && lt<=0.22){
+   n=1; reason="v25-right-only=>1";
+ }
+
+ // 7: top + two right strokes, almost no lower-left and weak bottom.
+ // Upper-left contamination is intentionally ignored because the LCD photo
+ // often carries a shadow/reflection beside the digit.
+ if(top>=0.72 && rt>=0.58 && rb>=0.50 && lb<=0.16 && bot<=0.38){
+   n=7; reason="v25-top-right-no-lb=>7";
+ }
+
+ // 0: perimeter is strong but the middle bar is weaker than the outer frame.
+ // This specifically separates photographed 0 from 8 without templates.
+ const perimeter=(top+rt+rb+bot+lb+lt)/6;
+ if(top>=0.72 && bot>=0.62 && lb>=0.62 && lt>=0.62 &&
+    mid<=perimeter*0.78){
+   n=0; reason="v25-perimeter-no-mid=>0";
+ }
+
+ if(n!==r.n){
+   r.baseN=r.n;
+   r.n=n;
+   r.overrideReason=reason;
+   r.confidence=Math.max(r.confidence,0.82);
+ }
+ return r;
+}
+
 function analyzeFixedGroup(group){
- const rs=DIGIT_BOXES[group].map(classifyFixedDigit);
+ const rs=DIGIT_BOXES[group].map(box=>v25StructuralOverride(classifyFixedDigit(box)));
  const text=rs.map(r=>r.n===null?"?":String(r.n)).join("");
  const value=rs.every(r=>r.n!==null)?Number(text):null;
  return {rs,value,text};
@@ -915,9 +845,10 @@ $("readBtn").onclick=async()=>{
    const fmt=(name,obj)=>name+" "+obj.rs.map(r=>
      `${r.n??"?"} conf=${r.confidence.toFixed(2)} margin=${r.margin.toFixed(2)} `+
      `rel=${r.features.rel.map(v=>v.toFixed(2)).join(",")} `+
-     `trim=${r.refine.mode}:${r.refine.x1},${r.refine.y1},${r.refine.x2},${r.refine.y2} `+
-     `cuts=gray:${r.features.absCut.toFixed(1)},contrast:${r.features.conCut.toFixed(1)} crop=v24`
+     `${r.overrideReason ? "override="+r.overrideReason+" base="+(r.baseN??"?")+" " : ""}`+
+     `cuts=gray:${r.features.absCut.toFixed(1)},contrast:${r.features.conCut.toFixed(1)} crop=v25`
    ).join(" / ");
+
    const log=fmt("SYS",S)+"\n"+fmt("DIA",D)+"\n"+fmt("PULSE",P);
    $("debug").textContent=log;
 
@@ -930,7 +861,7 @@ $("readBtn").onclick=async()=>{
    if(S.value!==null&&D.value!==null&&P.value!==null&&S.value>D.value){
      $("status").textContent=`HEM-7271T専用判定：${S.value}/${D.value}、脈拍 ${P.value}。写真と照合してください。`;
    }else{
-     $("status").textContent="解析は完了しました。一部の桁が不確かです。数字本体の自動トリミング結果とログを確認してください。";
+     $("status").textContent="解析は完了しました。一部の桁が不確かです。下のログを確認してください。";
    }
  }catch(err){
    const msg=errorText(err);
