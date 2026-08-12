@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v29</title>
+<title>HEM-7271T 血圧フォト記録 v30</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -48,7 +48,7 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v29</h1>
+<h1>HEM-7271T 血圧フォト記録 v30</h1>
 <div class="sub">濃いLCDセグメント分離 + 形状判定（V23修正版2）</div>
 
 <div class="card">
@@ -76,7 +76,7 @@ svg{width:100%;height:230px;display:block}
  <div id="presetStage">
    <canvas id="presetCanvas" width="900" height="700"></canvas>
  </div>
- <div class="presetHint">V29ではLCD四隅から7桁位置まで自動化します。7桁はHEM-7271Tの基準座標で配置し、画像から数ピクセルだけ局所補正します。認識処理はV28を維持します。</div>
+ <div class="presetHint">V30では固定座標を使わず、補正後LCD画像からSYS・DIA・PULSEの3行を実測し、各行を3桁・2桁・2桁に分割して青枠を作ります。</div>
  <div class="row" style="margin-top:10px">
   <button id="autoBoxesBtn" class="secondary" disabled>桁位置を自動検出</button>
   <button id="readBtn" disabled>HEM-7271T専用解析</button>
@@ -140,7 +140,7 @@ const PAT={
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
 };
 
-const PRESET_KEY="bp_hem7271t_digit_preset_v29";
+const PRESET_KEY="bp_hem7271t_digit_preset_v30";
 const DEFAULT_DIGIT_BOXES={
  sys:[
   {id:"s1",label:"SYS1",x:.17,y:.18,w:.12,h:.31},
@@ -283,12 +283,12 @@ window.addEventListener("resize",()=>positionPreset());
 
 $("savePresetBtn").onclick=()=>{
  localStorage.setItem(PRESET_KEY,JSON.stringify(DIGIT_BOXES)); V26_MANUAL_OVERRIDE=true;
- $("status").textContent="V29桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
+ $("status").textContent="V30桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
 };
 $("resetPresetBtn").onclick=()=>{
  DIGIT_BOXES=structuredClone(DEFAULT_DIGIT_BOXES);
  buildPresetOverlay();
- $("status").textContent="桁位置をV29基準位置へ戻しました。";
+ $("status").textContent="桁位置をV30自動検出位置へ戻しました。";
 };
 
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
@@ -1033,62 +1033,165 @@ function splitDigitsV26(mask,w,row,count){
 function autoDetectDigitBoxesV26(){
  if(!rc || !rc.width || !rc.height)throw new Error("先に液晶を補正してください。");
 
- // V29: HEM-7271T-specific normalized anchors.
- // These are based on the rectified LCD, so they do not drift with camera angle.
- const anchors={
-   sys:[
-     {id:"s1",label:"SYS1",x:.17,y:.18,w:.12,h:.31},
-     {id:"s2",label:"SYS2",x:.30,y:.18,w:.18,h:.31},
-     {id:"s3",label:"SYS3",x:.52,y:.18,w:.11,h:.31}
-   ],
-   dia:[
-     {id:"d1",label:"DIA1",x:.32,y:.43,w:.16,h:.28},
-     {id:"d2",label:"DIA2",x:.52,y:.43,w:.11,h:.28}
-   ],
-   pulse:[
-     {id:"p1",label:"P1",x:.39,y:.70,w:.13,h:.19},
-     {id:"p2",label:"P2",x:.53,y:.70,w:.13,h:.19}
-   ]
+ const W=rc.width,H=rc.height;
+ const im=rctx.getImageData(0,0,W,H),d=im.data;
+ const lumAt=(x,y)=>{
+   const i=(y*W+x)*4;
+   return .299*d[i]+.587*d[i+1]+.114*d[i+2];
+ };
+ const smooth=(arr,rad)=>{
+   const out=new Float32Array(arr.length);
+   for(let i=0;i<arr.length;i++){
+     let s=0,n=0;
+     for(let j=Math.max(0,i-rad);j<=Math.min(arr.length-1,i+rad);j++){s+=arr[j];n++}
+     out[i]=n?s/n:0;
+   }
+   return out;
  };
 
- const tweak=(b)=>{
-   // Only a tiny centroid correction is permitted.
-   // It cannot resize the box or jump to a neighboring digit.
-   const X=Math.max(0,Math.round(b.x*rc.width));
-   const Y=Math.max(0,Math.round(b.y*rc.height));
-   const W=Math.max(8,Math.round(b.w*rc.width));
-   const H=Math.max(8,Math.round(b.h*rc.height));
-   const ww=Math.min(W,rc.width-X),hh=Math.min(H,rc.height-Y);
-   if(ww<=2||hh<=2)return {...b};
+ // 1) Detect three horizontal digit rows from actual dark-pixel density.
+ const x0=Math.round(W*.07),x1=Math.round(W*.70);
+ const y0=Math.round(H*.08),y1=Math.round(H*.94);
+ const row=new Float32Array(H);
+ for(let y=y0;y<y1;y++){
+   let n=0;
+   for(let x=x0;x<x1;x++)if(lumAt(x,y)<135)n++;
+   row[y]=n/(x1-x0);
+ }
+ const rs=smooth(row,Math.max(2,Math.round(H*.008)));
+ let peak=0;
+ for(let y=y0;y<y1;y++)peak=Math.max(peak,rs[y]);
+ const thr=Math.max(.015,peak*.28);
 
-   const im=rctx.getImageData(X,Y,ww,hh),d=im.data;
-   let sx=0,sy=0,n=0;
-   for(let y=0;y<hh;y++){
-     for(let x=0;x<ww;x++){
-       const i=(y*ww+x)*4;
-       const lum=.299*d[i]+.587*d[i+1]+.114*d[i+2];
-       if(lum<105){
-         sx+=x;sy+=y;n++;
-       }
+ let bands=[],inside=false,b0=0;
+ for(let y=y0;y<y1;y++){
+   const on=rs[y]>=thr;
+   if(on&&!inside){b0=y;inside=true}
+   if((!on||y===y1-1)&&inside){
+     const b1=(on&&y===y1-1)?y:y-1;
+     if(b1-b0>=H*.035)bands.push({y0:b0,y1:b1});
+     inside=false;
+   }
+ }
+
+ const merged=[];
+ for(const b of bands){
+   const last=merged[merged.length-1];
+   if(last && b.y0-last.y1<H*.035)last.y1=b.y1;
+   else merged.push({...b});
+ }
+
+ const targets={sys:.28,dia:.56,pulse:.79};
+ const chosen={};
+ const used=new Set();
+ for(const [name,target] of Object.entries(targets)){
+   let bi=-1,bs=-1e9;
+   merged.forEach((b,i)=>{
+     if(used.has(i))return;
+     const cy=((b.y0+b.y1)/2)/H;
+     let den=0;
+     for(let y=b.y0;y<=b.y1;y++)den+=rs[y];
+     den/=Math.max(1,b.y1-b.y0+1);
+     const score=-Math.abs(cy-target)*5+den*2;
+     if(score>bs){bs=score;bi=i}
+   });
+   if(bi>=0){chosen[name]={...merged[bi]};used.add(bi)}
+ }
+
+ const fallback={
+   sys:{y0:Math.round(H*.15),y1:Math.round(H*.43)},
+   dia:{y0:Math.round(H*.42),y1:Math.round(H*.69)},
+   pulse:{y0:Math.round(H*.69),y1:Math.round(H*.90)}
+ };
+ for(const k of ["sys","dia","pulse"])if(!chosen[k])chosen[k]=fallback[k];
+
+ function splitRow(group,count){
+   let {y0,y1}=chosen[group];
+   const py=Math.round((y1-y0+1)*(group==="pulse"?.12:.10));
+   y0=Math.max(0,y0-py); y1=Math.min(H-1,y1+py);
+
+   const col=new Float32Array(W);
+   const xa=Math.round(W*.07),xb=Math.round(W*.70);
+   for(let x=xa;x<xb;x++){
+     let n=0;
+     for(let y=y0;y<=y1;y++)if(lumAt(x,y)<135)n++;
+     col[x]=n/(y1-y0+1);
+   }
+   const cs=smooth(col,Math.max(1,Math.round(W*.004)));
+   let cp=0;
+   for(let x=xa;x<xb;x++)cp=Math.max(cp,cs[x]);
+   const ct=Math.max(.012,cp*.22);
+
+   // Find active x-runs then merge fragments of the same digit.
+   let runs=[],on=false,r0=0;
+   for(let x=xa;x<xb;x++){
+     const active=cs[x]>=ct;
+     if(active&&!on){r0=x;on=true}
+     if((!active||x===xb-1)&&on){
+       const r1=(active&&x===xb-1)?x:x-1;
+       if(r1-r0>=Math.max(2,W*.008))runs.push({x0:r0,x1:r1});
+       on=false;
      }
    }
-   if(n<25)return {...b};
+   const mr=[];
+   const gapLimit=group==="sys"?W*.025:W*.020;
+   for(const r of runs){
+     const last=mr[mr.length-1];
+     if(last && r.x0-last.x1<gapLimit)last.x1=r.x1;
+     else mr.push({...r});
+   }
+   let blocks=mr.filter(r=>r.x1-r.x0+1>=W*.018);
 
-   const cx=sx/n/ww,cy=sy/n/hh;
-   // Max movement ~1.2% LCD width / 1.0% LCD height.
-   const dx=Math.max(-.012,Math.min(.012,(cx-.5)*b.w*.18));
-   const dy=Math.max(-.010,Math.min(.010,(cy-.5)*b.h*.14));
-   return {...b,x:b.x+dx,y:b.y+dy};
- };
+   // Merge closest blocks until target digit count.
+   while(blocks.length>count){
+     let best=0,g=Infinity;
+     for(let i=0;i<blocks.length-1;i++){
+       const gg=blocks[i+1].x0-blocks[i].x1;
+       if(gg<g){g=gg;best=i}
+     }
+     const a=blocks[best],b=blocks[best+1];
+     blocks.splice(best,2,{x0:a.x0,x1:b.x1});
+   }
 
+   // Fallback: divide the measured dark span evenly.
+   if(blocks.length!==count){
+     let minX=xb,maxX=xa;
+     for(let x=xa;x<xb;x++)if(cs[x]>=ct){minX=Math.min(minX,x);maxX=Math.max(maxX,x)}
+     if(maxX<=minX){minX=Math.round(W*.14);maxX=Math.round(W*(group==="sys"?.61:.58))}
+     const span=maxX-minX+1;
+     blocks=[];
+     for(let i=0;i<count;i++)blocks.push({
+       x0:Math.round(minX+span*i/count),
+       x1:Math.round(minX+span*(i+1)/count)
+     });
+   }
+
+   const px=Math.round(W*(group==="pulse"?.010:.012));
+   return blocks.map(r=>{
+     let a=Math.max(0,r.x0-px),b=Math.min(W-1,r.x1+px);
+     return {x:a/W,y:y0/H,w:(b-a+1)/W,h:(y1-y0+1)/H};
+   });
+ }
+
+ const sys=splitRow("sys",3),dia=splitRow("dia",2),pulse=splitRow("pulse",2);
  DIGIT_BOXES={
-   sys:anchors.sys.map(tweak),
-   dia:anchors.dia.map(tweak),
-   pulse:anchors.pulse.map(tweak)
+   sys:sys.map((b,i)=>({id:"s"+(i+1),label:"SYS"+(i+1),...b})),
+   dia:dia.map((b,i)=>({id:"d"+(i+1),label:"DIA"+(i+1),...b})),
+   pulse:pulse.map((b,i)=>({id:"p"+(i+1),label:"P"+(i+1),...b}))
  };
  buildPresetOverlay();
+
+ V30_ROW_DIAG={
+   bands:merged.map(b=>[(b.y0/H).toFixed(3),(b.y1/H).toFixed(3)]),
+   sys:[(chosen.sys.y0/H).toFixed(3),(chosen.sys.y1/H).toFixed(3)],
+   dia:[(chosen.dia.y0/H).toFixed(3),(chosen.dia.y1/H).toFixed(3)],
+   pulse:[(chosen.pulse.y0/H).toFixed(3),(chosen.pulse.y1/H).toFixed(3)]
+ };
+ $("status").textContent="V30：実際の数字行と黒画素分布から7桁を自動配置しました。";
  return DIGIT_BOXES;
 }
+
+let V30_ROW_DIAG=null;
 
 let V26_MANUAL_OVERRIDE=false;
 $("autoBoxesBtn").onclick=()=>{
