@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v11</title>
+<title>HEM-7271T 血圧フォト記録 v12</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c;--blue:#2563eb}
 *{box-sizing:border-box}
@@ -16,8 +16,7 @@ h1{font-size:24px;margin:6px 0}.sub,.status{color:var(--muted);font-size:14px;li
 button,.filebtn{display:inline-block;border:0;border-radius:12px;padding:12px 14px;font-size:15px;font-weight:700;background:var(--accent);color:#fff;cursor:pointer}
 .secondary{background:#e5e7eb;color:#111827}.danger{background:#fee2e2;color:var(--danger)}
 input[type=file]{display:none}
-input[type=number],input[type=date],input[type=text],input[type=range]{width:100%}
-input[type=number],input[type=date],input[type=text]{padding:11px;border:1px solid var(--line);border-radius:11px;font-size:16px}
+input[type=number],input[type=date],input[type=text]{width:100%;padding:11px;border:1px solid var(--line);border-radius:11px;font-size:16px}
 .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}.grow{flex:1}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
@@ -36,13 +35,17 @@ label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
 table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1px solid var(--line);font-size:13px;text-align:left}th{color:var(--muted)}
 svg{width:100%;height:230px;display:block}
 .debug{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:pre-wrap;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:10px}
-@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}}
+.debuggrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.debugbox{border:1px solid var(--line);border-radius:12px;padding:8px;background:#fafafa}
+.debugbox canvas{width:100%;height:140px;object-fit:contain;background:#fff;border-radius:8px}
+.debugbox b{display:block;font-size:12px;margin-bottom:5px}
+@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}.debuggrid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v11</h1>
-<div class="sub">セグメント位置の自動探索 + 低信頼度は「?」</div>
+<h1>HEM-7271T 血圧フォト記録 v12</h1>
+<div class="sub">背景差分で液晶セグメントを強調 + 候補差が小さい場合は「?」</div>
 
 <div class="card">
  <div class="row">
@@ -76,6 +79,12 @@ svg{width:100%;height:230px;display:block}
   <div class="result"><span>下 DIA</span><b id="rDia">—</b></div>
   <div class="result"><span>脈拍</span><b id="rPulse">—</b></div>
  </div>
+
+ <div id="debuggrid" class="debuggrid" style="display:none">
+  <div class="debugbox"><b>SYS 差分</b><canvas id="dbgSys"></canvas></div>
+  <div class="debugbox"><b>DIA 差分</b><canvas id="dbgDia"></canvas></div>
+  <div class="debugbox"><b>PULSE 差分</b><canvas id="dbgPulse"></canvas></div>
+ </div>
  <div id="debug" class="debug" style="display:none"></div>
 </div>
 
@@ -104,7 +113,7 @@ svg{width:100%;height:230px;display:block}
 
 <script>
 const $=id=>document.getElementById(id);
-const KEY="bp_hem7271t_v11", CALKEY="bp_hem7271t_digitboxes_v11";
+const KEY="bp_hem7271t_v12", CALKEY="bp_hem7271t_digitboxes_v12";
 $("date").value=new Date().toISOString().slice(0,10);
 
 let src=null,pts=[],boxes=[];
@@ -122,7 +131,11 @@ const DEFAULT_BOXES=[
  {id:"p2",label:"P2",group:"pulse",x:.61,y:.69,w:.11,h:.18}
 ];
 
-const MAP={"1111110":0,"0110000":1,"1101101":2,"1111001":3,"0110011":4,"1011011":5,"1011111":6,"1110000":7,"1111111":8,"1111011":9};
+const PAT={
+ 0:[1,1,1,1,1,1,0],1:[0,1,1,0,0,0,0],2:[1,1,0,1,1,0,1],3:[1,1,1,1,0,0,1],
+ 4:[0,1,1,0,0,1,1],5:[1,0,1,1,0,1,1],6:[1,0,1,1,1,1,1],7:[1,1,1,0,0,0,0],
+ 8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
+};
 
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
 
@@ -210,128 +223,149 @@ function positionBoxes(){
 $("saveCalibBtn").onclick=()=>{localStorage.setItem(CALKEY,JSON.stringify(boxes));$("status").textContent="数字枠の位置を保存しました。"};
 $("resetBoxesBtn").onclick=()=>{boxes=structuredClone(DEFAULT_BOXES);makeBoxes();positionBoxes();$("status").textContent="数字枠を初期位置へ戻しました。"};
 
-function cropGray(b){
+function cropDigit(b){
  const x=Math.max(0,Math.round(b.x*rc.width)),y=Math.max(0,Math.round(b.y*rc.height));
- const w=Math.max(10,Math.round(b.w*rc.width)),h=Math.max(10,Math.round(b.h*rc.height));
- const d=rctx.getImageData(x,y,w,h).data;
- const g=new Float32Array(w*h);
- for(let i=0,j=0;i<d.length;i+=4,j++)g[j]=.299*d[i]+.587*d[i+1]+.114*d[i+2];
- return {g,w,h};
+ const w=Math.max(20,Math.round(b.w*rc.width)),h=Math.max(20,Math.round(b.h*rc.height));
+ const c=document.createElement("canvas");c.width=90;c.height=150;
+ c.getContext("2d").drawImage(rc,x,y,w,h,0,0,c.width,c.height);
+ return c;
 }
 
-function smooth1D(arr,r=2){
- const out=new Float32Array(arr.length);
- for(let i=0;i<arr.length;i++){let s=0,n=0;for(let k=-r;k<=r;k++){let j=i+k;if(j>=0&&j<arr.length){s+=arr[j];n++}}out[i]=s/n}
+function grayscale(c){
+ const ctx=c.getContext("2d",{willReadFrequently:true}),im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
+ const g=new Float32Array(c.width*c.height);
+ for(let i=0,j=0;i<d.length;i+=4,j++)g[j]=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+ return {g,w:c.width,h:c.height};
+}
+
+function boxBlur(src,w,h,r){
+ const out=new Float32Array(src.length);
+ const tmp=new Float32Array(src.length);
+ for(let y=0;y<h;y++){
+  let sum=0;
+  for(let x=-r;x<=r;x++){let xx=Math.max(0,Math.min(w-1,x));sum+=src[y*w+xx]}
+  for(let x=0;x<w;x++){
+   tmp[y*w+x]=sum/(2*r+1);
+   let oldx=Math.max(0,x-r),newx=Math.min(w-1,x+r+1);
+   sum+=src[y*w+newx]-src[y*w+oldx];
+  }
+ }
+ for(let x=0;x<w;x++){
+  let sum=0;
+  for(let y=-r;y<=r;y++){let yy=Math.max(0,Math.min(h-1,y));sum+=tmp[yy*w+x]}
+  for(let y=0;y<h;y++){
+   out[y*w+x]=sum/(2*r+1);
+   let oldy=Math.max(0,y-r),newy=Math.min(h-1,y+r+1);
+   sum+=tmp[newy*w+x]-tmp[oldy*w+x];
+  }
+ }
  return out;
 }
 
-// Search the actual dark horizontal/vertical bars inside the digit.
-// We search broad expected bands, then choose the darkest local stripe relative to neighbors.
-function scanHorizontal(img,yMin,yMax){
- const {g,w,h}=img;let profile=[];
- for(let y=Math.floor(yMin*h);y<Math.floor(yMax*h);y++){
-   let s=0,n=0;
-   for(let x=Math.floor(.12*w);x<Math.floor(.88*w);x++){s+=g[y*w+x];n++}
-   profile.push({pos:y,val:s/n});
- }
- let vals=profile.map(p=>p.val);vals=smooth1D(vals,2);
- let best=0;for(let i=1;i<vals.length;i++)if(vals[i]<vals[best])best=i;
- const p=profile[best].pos,local=vals[best];
- let bg=0,n=0;
- for(let dy of [-Math.round(.08*h),Math.round(.08*h)]){
-   let yy=Math.max(0,Math.min(h-1,p+dy)),s=0,m=0;
-   for(let x=Math.floor(.12*w);x<Math.floor(.88*w);x++){s+=g[yy*w+x];m++}
-   bg+=s/m;n++;
- }
- return {contrast:bg/n-local,pos:p/h};
+function differenceImage(c){
+ const {g,w,h}=grayscale(c);
+ const bg=boxBlur(g,w,h,5);
+ const diff=new Float32Array(g.length);
+ for(let i=0;i<g.length;i++)diff[i]=Math.max(0,bg[i]-g[i]); // dark object remains positive
+ return {diff,w,h};
 }
 
-function scanVertical(img,xMin,xMax,yMin,yMax){
- const {g,w,h}=img;let profile=[];
- for(let x=Math.floor(xMin*w);x<Math.floor(xMax*w);x++){
-   let s=0,n=0;
-   for(let y=Math.floor(yMin*h);y<Math.floor(yMax*h);y++){s+=g[y*w+x];n++}
-   profile.push({pos:x,val:s/n});
+function meanRegion(diff,w,h,rect){
+ const [x1,y1,x2,y2]=rect;
+ let s=0,n=0;
+ for(let y=Math.floor(y1*h);y<Math.ceil(y2*h);y++){
+  if(y<0||y>=h)continue;
+  for(let x=Math.floor(x1*w);x<Math.ceil(x2*w);x++){
+   if(x<0||x>=w)continue;
+   s+=diff[y*w+x];n++;
+  }
  }
- let vals=profile.map(p=>p.val);vals=smooth1D(vals,2);
- let best=0;for(let i=1;i<vals.length;i++)if(vals[i]<vals[best])best=i;
- const p=profile[best].pos,local=vals[best];
- let bg=0,n=0;
- for(let dx of [-Math.round(.10*w),Math.round(.10*w)]){
-   let xx=Math.max(0,Math.min(w-1,p+dx)),s=0,m=0;
-   for(let y=Math.floor(yMin*h);y<Math.floor(yMax*h);y++){s+=g[y*w+xx];m++}
-   bg+=s/m;n++;
- }
- return {contrast:bg/n-local,pos:p/w};
+ return n?s/n:0;
 }
 
-function recognizeDigit(b){
- const img=cropGray(b);
- const A=scanHorizontal(img,.00,.25);
- const G=scanHorizontal(img,.34,.66);
- const D=scanHorizontal(img,.74,1.00);
- const F=scanVertical(img,.00,.42,.08,.48);
- const B=scanVertical(img,.58,1.00,.08,.48);
- const E=scanVertical(img,.00,.42,.52,.92);
- const C=scanVertical(img,.58,1.00,.52,.92);
- const segs=[A,B,C,D,E,F,G];
+const ZONES=[
+ [.20,.03,.80,.18], // a
+ [.67,.10,.96,.47], // b
+ [.67,.53,.96,.90], // c
+ [.20,.82,.80,.98], // d
+ [.04,.53,.33,.90], // e
+ [.04,.10,.33,.47], // f
+ [.20,.42,.80,.60]  // g
+];
 
- // adaptive threshold based on distribution of the 7 contrast values
- const vals=segs.map(s=>s.contrast);
- const sorted=[...vals].sort((a,b)=>a-b);
- const median=sorted[3],max=sorted[6];
- const threshold=Math.max(5, median + (max-median)*.30);
- const bits=vals.map(v=>v>threshold?"1":"0").join("");
+function classifyDigit(b){
+ const c=cropDigit(b),{diff,w,h}=differenceImage(c);
+ const vals=ZONES.map(z=>meanRegion(diff,w,h,z));
+ const max=Math.max(...vals),min=Math.min(...vals);
+ const norm=vals.map(v=>max>min?(v-min)/(max-min):0);
 
- let exact=MAP[bits];
- if(exact!==undefined){
-   const confidence=(max-threshold)/Math.max(1,max);
-   return {n:exact,bits,vals,segs,confidence};
- }
-
- // nearest pattern; require clear separation between best and second-best
- let candidates=[];
- for(const [pat,n] of Object.entries(MAP)){
-   let dist=0;
+ let cand=[];
+ for(const [digit,pat] of Object.entries(PAT)){
+   let err=0;
    for(let i=0;i<7;i++){
-     const expected=pat[i]==="1";
-     const strength=(vals[i]-threshold)/Math.max(5,Math.abs(max-threshold));
-     dist += expected ? Math.max(0,1-strength) : Math.max(0,1+strength);
+     const target=pat[i]?0.78:0.15;
+     err+=(norm[i]-target)*(norm[i]-target);
    }
-   candidates.push({n:Number(n),dist});
+   cand.push({digit:Number(digit),err});
  }
- candidates.sort((a,b)=>a.dist-b.dist);
- const margin=candidates[1].dist-candidates[0].dist;
- const confidence=Math.max(0,Math.min(1,margin/1.5));
- return {n:confidence>=.35?candidates[0].n:null,bits,vals,segs,confidence};
+ cand.sort((a,b)=>a.err-b.err);
+ const best=cand[0],second=cand[1];
+ const margin=second.err-best.err;
+ const confidence=Math.max(0,Math.min(1,margin/0.30));
+
+ return {
+   n: confidence>=0.38 ? best.digit : null,
+   confidence, vals, norm, best:best.err, second:second.err, canvas:makeDiffCanvas(diff,w,h)
+ };
 }
 
-function group(group){
- const rs=boxes.filter(b=>b.group===group).map(recognizeDigit);
- const ok=rs.every(r=>r.n!==null && r.confidence>=.35);
+function makeDiffCanvas(diff,w,h){
+ const c=document.createElement("canvas");c.width=w;c.height=h;
+ const ctx=c.getContext("2d"),im=ctx.createImageData(w,h);
+ let max=Math.max(...diff);if(max<1)max=1;
+ for(let i=0;i<diff.length;i++){
+  const v=255-Math.round(Math.min(1,diff[i]/max)*255);
+  const j=i*4;im.data[j]=im.data[j+1]=im.data[j+2]=v;im.data[j+3]=255;
+ }
+ ctx.putImageData(im,0,0);return c;
+}
+
+function group(groupName){
+ const rs=boxes.filter(b=>b.group===groupName).map(classifyDigit);
+ const ok=rs.every(r=>r.n!==null);
  return {rs,value:ok?Number(rs.map(r=>r.n).join("")):null};
+}
+
+function drawDebug(S,D,P){
+ $("debuggrid").style.display="grid";
+ const paint=(obj,id)=>{
+   const c=$(id),ctx=c.getContext("2d");c.width=300;c.height=150;ctx.fillStyle="#fff";ctx.fillRect(0,0,300,150);
+   obj.rs.forEach((r,i)=>ctx.drawImage(r.canvas,i*95+5,10,85,130));
+ };
+ paint(S,"dbgSys");paint(D,"dbgDia");paint(P,"dbgPulse");
 }
 
 $("readBtn").onclick=()=>{
  const S=group("sys"),D=group("dia"),P=group("pulse");
+ drawDebug(S,D,P);
  $("results").style.display="grid";$("debug").style.display="block";
 
  const show=(obj,id,input,min,max)=>{
-   if(obj.value!==null && obj.value>=min && obj.value<=max){
-     $(id).textContent=obj.value;$(input).value=obj.value;
-   }else{
-     $(id).textContent="?";$(input).value="";
-   }
+  if(obj.value!==null&&obj.value>=min&&obj.value<=max){
+   $(id).textContent=obj.value;$(input).value=obj.value;
+  }else{
+   $(id).textContent="?";$(input).value="";
+  }
  };
  show(S,"rSys","sys",70,250);show(D,"rDia","dia",35,150);show(P,"rPulse","pulse",35,200);
 
- const fmt=(name,obj)=>name+" "+obj.rs.map(r=>`${r.n??"?"}[${r.bits}] conf=${r.confidence.toFixed(2)} vals=${r.vals.map(v=>v.toFixed(1)).join(",")}`).join(" / ");
+ const fmt=(name,obj)=>name+" "+obj.rs.map(r=>`${r.n??"?"} conf=${r.confidence.toFixed(2)} vals=${r.vals.map(v=>v.toFixed(1)).join(",")} norm=${r.norm.map(v=>v.toFixed(2)).join(",")}`).join(" / ");
  $("debug").textContent=fmt("SYS",S)+"\n"+fmt("DIA",D)+"\n"+fmt("PULSE",P);
 
  if(S.value!==null&&D.value!==null&&P.value!==null&&S.value>D.value){
-   $("status").textContent=`画像根拠あり：${S.value}/${D.value}、脈拍 ${P.value}。写真と照合してください。`;
+  $("status").textContent=`画像根拠あり：${S.value}/${D.value}、脈拍 ${P.value}。写真と照合してください。`;
  }else{
-   $("status").textContent="信頼度が不足している桁は「?」のままです。無理な補完はしていません。";
+  $("status").textContent="候補差が小さい桁は「?」です。無理な補完はしていません。";
  }
 };
 
