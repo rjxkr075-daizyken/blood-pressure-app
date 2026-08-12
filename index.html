@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v33</title>
+<title>HEM-7271T 血圧フォト記録 v34</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -48,7 +48,7 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v33</h1>
+<h1>HEM-7271T 血圧フォト記録 v34</h1>
 <div class="sub">濃いLCDセグメント分離 + 形状判定（V23修正版2）</div>
 
 <div class="card">
@@ -76,7 +76,7 @@ svg{width:100%;height:230px;display:block}
  <div id="presetStage">
    <canvas id="presetCanvas" width="900" height="700"></canvas>
  </div>
- <div class="presetHint">V33では7セグメント同士を結合して数字を推定しません。SYS・DIA・PULSE各行の縦方向の黒画素量を調べ、数字と数字の間にある空白の谷を境界として3桁・2桁・2桁へ分割します。その後、各セル内の黒い数字本体だけを再トリミングして青枠にします。</div>
+ <div class="presetHint">V34では、まずSYS・DIA・PULSE各行で数字群の横方向の帯だけを検出し、左側の印刷文字と右側の圧力バーを除外します。その数字帯の内部だけで縦方向の黒画素量を調べ、数字と数字の間の空白の谷を境界として3桁・2桁・2桁へ分割します。</div>
  <div class="row" style="margin-top:10px">
   <button id="autoBoxesBtn" class="secondary" disabled>桁位置を自動検出</button>
   <button id="readBtn" disabled>HEM-7271T専用解析</button>
@@ -140,7 +140,7 @@ const PAT={
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
 };
 
-const PRESET_KEY="bp_hem7271t_digit_preset_v33";
+const PRESET_KEY="bp_hem7271t_digit_preset_v34";
 const DEFAULT_DIGIT_BOXES={
  sys:[
   {id:"s1",label:"SYS1",x:.17,y:.18,w:.12,h:.31},
@@ -283,12 +283,12 @@ window.addEventListener("resize",()=>positionPreset());
 
 $("savePresetBtn").onclick=()=>{
  localStorage.setItem(PRESET_KEY,JSON.stringify(DIGIT_BOXES)); V26_MANUAL_OVERRIDE=true;
- $("status").textContent="V33 桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
+ $("status").textContent="V34 桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
 };
 $("resetPresetBtn").onclick=()=>{
  DIGIT_BOXES=structuredClone(DEFAULT_DIGIT_BOXES);
  buildPresetOverlay();
- $("status").textContent="桁位置をV33 空白境界検出位置へ戻しました。";
+ $("status").textContent="桁位置をV34 数字帯＋空白境界検出位置へ戻しました。";
 };
 
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
@@ -1040,28 +1040,24 @@ function autoDetectDigitBoxesV26(){
    return .299*d[i]+.587*d[i+1]+.114*d[i+2];
  };
 
- // LCD numeric field only: exclude left printed labels and right pressure bar.
- const X0=Math.round(W*.17), X1=Math.round(W*.67);
-
- // Row bands in rectified LCD coordinates.
- // These are deliberately broad; the actual top/bottom is refined from ink.
  const rowDefs={
-   sys:{y0:.17,y1:.45,count:3},
-   dia:{y0:.40,y1:.70,count:2},
-   pulse:{y0:.67,y1:.93,count:2}
+   sys:{y0:.18,y1:.45,count:3, minX:.20,maxX:.64},
+   dia:{y0:.41,y1:.70,count:2, minX:.22,maxX:.63},
+   pulse:{y0:.68,y1:.93,count:2,minX:.30,maxX:.61}
  };
 
- // Global dark threshold from numeric area.
+ // Robust threshold from central LCD only.
  const vals=[];
- for(let y=Math.round(H*.12);y<Math.round(H*.93);y+=2){
-   for(let x=X0;x<X1;x+=2) vals.push(lum(x,y));
+ const gx0=Math.round(W*.18),gx1=Math.round(W*.68);
+ for(let y=Math.round(H*.12);y<Math.round(H*.94);y+=2){
+   for(let x=gx0;x<gx1;x+=2) vals.push(lum(x,y));
  }
  vals.sort((a,b)=>a-b);
- const q15=vals[Math.floor(vals.length*.15)] ?? 90;
- const q55=vals[Math.floor(vals.length*.55)] ?? 155;
- const thr=Math.max(70,Math.min(150,q15+(q55-q15)*.42));
+ const q12=vals[Math.floor(vals.length*.12)] ?? 95;
+ const q50=vals[Math.floor(vals.length*.50)] ?? 155;
+ const thr=Math.max(72,Math.min(150,q12+(q50-q12)*.46));
 
- function smooth(arr,r=4){
+ function smooth(arr,r){
    const out=new Float32Array(arr.length);
    for(let i=0;i<arr.length;i++){
      let s=0,n=0;
@@ -1074,142 +1070,211 @@ function autoDetectDigitBoxesV26(){
    return out;
  }
 
+ function inkProjection(x0,x1,y0,y1){
+   const n=x1-x0+1;
+   const p=new Float32Array(n);
+   for(let x=x0;x<=x1;x++){
+     let dark=0,total=0;
+     for(let y=y0;y<=y1;y++){
+       if(lum(x,y)<thr) dark++;
+       total++;
+     }
+     p[x-x0]=dark/Math.max(1,total);
+   }
+   return p;
+ }
+
+ function findDigitBand(name,def){
+   const y0=Math.round(H*def.y0),y1=Math.round(H*def.y1);
+   const sx0=Math.round(W*def.minX),sx1=Math.round(W*def.maxX);
+   let p=inkProjection(sx0,sx1,y0,y1);
+   p=smooth(p,Math.max(2,Math.round(W*.006)));
+
+   let peak=0;
+   for(const v of p) if(v>peak) peak=v;
+
+   // Detect sustained activity, not isolated strokes/noise.
+   const activity=Math.max(.012,peak*.10);
+   const active=p.map(v=>v>=activity?1:0);
+
+   // Morphological close over small gaps so one digit group stays one band.
+   const gapClose=Math.max(4,Math.round(W*.018));
+   let a=Array.from(active);
+   for(let i=0;i<a.length;){
+     if(a[i]){i++;continue;}
+     let j=i;
+     while(j<a.length&&!a[j])j++;
+     if(i>0&&j<a.length&&(j-i)<=gapClose){
+       for(let k=i;k<j;k++)a[k]=1;
+     }
+     i=j;
+   }
+
+   // Extract active runs and score them.
+   const runs=[];
+   for(let i=0;i<a.length;){
+     while(i<a.length&&!a[i])i++;
+     if(i>=a.length)break;
+     let j=i;
+     while(j<a.length&&a[j])j++;
+     let mass=0;
+     for(let k=i;k<j;k++)mass+=p[k];
+     runs.push({i0:i,i1:j-1,w:j-i,mass});
+     i=j;
+   }
+
+   // Merge nearby runs if together they plausibly form the digit cluster.
+   const merged=[];
+   for(const r of runs){
+     if(!merged.length){merged.push({...r});continue;}
+     const prev=merged[merged.length-1];
+     const gap=r.i0-prev.i1-1;
+     if(gap<=Math.round(W*.035)){
+       prev.i1=r.i1;
+       prev.w=prev.i1-prev.i0+1;
+       prev.mass+=r.mass;
+     } else {
+       merged.push({...r});
+     }
+   }
+
+   // Choose the run / merged cluster that best matches expected row digit width.
+   const targetFrac = name==="sys" ? .29 : (name==="dia" ? .22 : .20);
+   const targetW=W*targetFrac;
+   let best=null,bestScore=-1e9;
+   for(const r of merged){
+     const abs0=sx0+r.i0, abs1=sx0+r.i1;
+     const width=r.w;
+     const center=(abs0+abs1)/2;
+     const centerTarget=W*(name==="pulse"?.47:.44);
+     const widthScore=1-Math.min(1,Math.abs(width-targetW)/Math.max(1,targetW));
+     const massScore=r.mass/Math.max(1,r.w);
+     const centerScore=1-Math.min(1,Math.abs(center-centerTarget)/(W*.22));
+     const score=widthScore*.50 + massScore*.30 + centerScore*.20;
+     if(score>bestScore){bestScore=score;best={...r,abs0,abs1}}
+   }
+
+   // Fallback to conservative central band.
+   if(!best || best.w < W*.08){
+     best={
+       abs0:Math.round(W*(name==="sys"?.27:name==="dia"?.31:.39)),
+       abs1:Math.round(W*(name==="sys"?.59:name==="dia"?.57:.58))
+     };
+   }
+
+   // Expand slightly but keep far away from printed labels / pressure bar.
+   const pad=Math.round(W*.012);
+   let bx0=Math.max(sx0,best.abs0-pad);
+   let bx1=Math.min(sx1,best.abs1+pad);
+
+   return {x0:bx0,x1:bx1,y0,y1,peak:+peak.toFixed(4),score:+bestScore.toFixed(4)};
+ }
+
  function findInkBounds(x0,x1,y0,y1){
    let minX=x1,maxX=x0,minY=y1,maxY=y0,found=false;
    for(let y=y0;y<=y1;y++){
      for(let x=x0;x<=x1;x++){
        if(lum(x,y)<thr){
          found=true;
-         if(x<minX)minX=x;if(x>maxX)maxX=x;
-         if(y<minY)minY=y;if(y>maxY)maxY=y;
+         minX=Math.min(minX,x);maxX=Math.max(maxX,x);
+         minY=Math.min(minY,y);maxY=Math.max(maxY,y);
        }
      }
    }
-   if(!found) return null;
-   return {x0:minX,x1:maxX,y0:minY,y1:maxY};
+   return found?{x0:minX,x1:maxX,y0:minY,y1:maxY}:null;
  }
 
- function splitRow(name,def){
-   const y0=Math.max(0,Math.round(H*def.y0));
-   const y1=Math.min(H-1,Math.round(H*def.y1));
-   const w=X1-X0+1;
-   const prof=new Float32Array(w);
+ function splitBand(name,band,count){
+   let p=inkProjection(band.x0,band.x1,band.y0,band.y1);
+   p=smooth(p,Math.max(2,Math.round(W*.004)));
 
-   // Vertical dark-pixel projection.
-   for(let x=X0;x<=X1;x++){
-     let dark=0,total=0;
-     for(let y=y0;y<=y1;y++){
-       const L=lum(x,y);
-       if(L<thr) dark++;
-       total++;
-     }
-     prof[x-X0]=dark/Math.max(1,total);
-   }
+   const span=band.x1-band.x0+1;
+   const cuts=[];
 
-   const sm=smooth(prof,Math.max(2,Math.round(W*.004)));
-
-   // Find active x span first, ignoring tiny noise.
-   let peak=0;
-   for(const v of sm) if(v>peak) peak=v;
-   const activeThr=Math.max(.015,peak*.12);
-
-   let ax0=0,ax1=w-1;
-   while(ax0<w-1 && sm[ax0]<activeThr) ax0++;
-   while(ax1>0 && sm[ax1]<activeThr) ax1--;
-
-   // Guard against accidental collapse.
-   if(ax1-ax0 < W*.12){
-     ax0=Math.round(w*.08);
-     ax1=Math.round(w*.92);
-   }
-
-   const span=ax1-ax0+1;
-   const boundaries=[];
-
-   // For N digits, seek N-1 minima near expected inter-digit positions.
-   // This uses "blank valleys", not segment connectivity.
-   for(let cut=1;cut<def.count;cut++){
-     const expected=ax0 + span*cut/def.count;
-     const searchHalf=Math.max(8,Math.round(span*.20));
-     let lo=Math.max(ax0+4,Math.round(expected-searchHalf));
-     let hi=Math.min(ax1-4,Math.round(expected+searchHalf));
-
+   // Search valleys near expected inter-digit positions, now ONLY inside digit band.
+   for(let c=1;c<count;c++){
+     const expected=span*c/count;
+     const half=Math.round(span*(count===3?.16:.22));
+     const lo=Math.max(3,Math.round(expected-half));
+     const hi=Math.min(span-4,Math.round(expected+half));
      let best=expected,bestScore=1e9;
+
      for(let i=lo;i<=hi;i++){
-       // local valley score with a little penalty for drifting far from expected
        let local=0,n=0;
-       for(let k=-3;k<=3;k++){
+       for(let k=-4;k<=4;k++){
          const j=i+k;
-         if(j>=0&&j<sm.length){local+=sm[j];n++}
+         if(j>=0&&j<p.length){local+=p[j];n++}
        }
        local/=Math.max(1,n);
+
+       // Prefer a valley surrounded by more ink on both sides.
+       let left=0,right=0,ln=0,rn=0;
+       const reach=Math.max(5,Math.round(span*.06));
+       for(let k=1;k<=reach;k++){
+         if(i-k>=0){left+=p[i-k];ln++}
+         if(i+k<p.length){right+=p[i+k];rn++}
+       }
+       left/=Math.max(1,ln); right/=Math.max(1,rn);
+       const valleyGain=((left+right)/2)-local;
        const drift=Math.abs(i-expected)/Math.max(1,span);
-       const score=local + drift*.10;
+       const score=local - valleyGain*.55 + drift*.10;
        if(score<bestScore){bestScore=score;best=i}
      }
-     boundaries.push(best);
+     cuts.push(Math.round(best));
    }
 
-   boundaries.sort((a,b)=>a-b);
+   cuts.sort((a,b)=>a-b);
 
-   // Prevent collapsed neighboring cells.
-   const minCell=Math.max(8,Math.round(span*(def.count===3?.12:.18)));
-   for(let i=1;i<boundaries.length;i++){
-     if(boundaries[i]-boundaries[i-1]<minCell){
-       const mid=(boundaries[i]+boundaries[i-1])/2;
-       boundaries[i-1]=Math.round(mid-minCell/2);
-       boundaries[i]=Math.round(mid+minCell/2);
+   // minimum spacing between digit cells
+   const minSep=Math.round(span*(count===3?.17:.28));
+   for(let i=1;i<cuts.length;i++){
+     if(cuts[i]-cuts[i-1]<minSep){
+       const mid=(cuts[i]+cuts[i-1])/2;
+       cuts[i-1]=Math.round(mid-minSep/2);
+       cuts[i]=Math.round(mid+minSep/2);
      }
    }
 
-   const edges=[ax0,...boundaries,ax1];
+   const edges=[0,...cuts,span-1];
    const boxes=[];
 
-   for(let i=0;i<def.count;i++){
-     let cx0=X0+edges[i];
-     let cx1=X0+edges[i+1];
+   for(let i=0;i<count;i++){
+     let x0=band.x0+edges[i];
+     let x1=band.x0+edges[i+1];
+     const inset=Math.max(1,Math.round(W*.002));
+     if(i>0)x0+=inset;
+     if(i<count-1)x1-=inset;
 
-     // Keep a tiny margin away from neighboring cell.
-     const inset=Math.max(1,Math.round(W*.003));
-     if(i>0) cx0+=inset;
-     if(i<def.count-1) cx1-=inset;
-
-     let ink=findInkBounds(cx0,cx1,y0,y1);
-
+     let ink=findInkBounds(x0,x1,band.y0,band.y1);
      if(!ink){
-       ink={x0:cx0,x1:cx1,y0:y0,y1:y1};
+       ink={x0,x1,y0:band.y0,y1:band.y1};
      }else{
-       // Remove isolated noise by repeatedly trimming empty borders.
-       const px=Math.max(2,Math.round(W*.008));
-       const py=Math.max(2,Math.round(H*.010));
-       ink.x0=Math.max(cx0,ink.x0-px);
-       ink.x1=Math.min(cx1,ink.x1+px);
-       ink.y0=Math.max(y0,ink.y0-py);
-       ink.y1=Math.min(y1,ink.y1+py);
+       const px=Math.round(W*.008),py=Math.round(H*.012);
+       ink.x0=Math.max(x0,ink.x0-px);
+       ink.x1=Math.min(x1,ink.x1+px);
+       ink.y0=Math.max(band.y0,ink.y0-py);
+       ink.y1=Math.min(band.y1,ink.y1+py);
      }
 
      boxes.push({
-       x:ink.x0/W,
-       y:ink.y0/H,
+       x:ink.x0/W,y:ink.y0/H,
        w:(ink.x1-ink.x0+1)/W,
        h:(ink.y1-ink.y0+1)/H
      });
    }
 
-   return {
-     boxes,
-     diag:{
-       peak:+peak.toFixed(4),
-       active:[ax0,ax1],
-       cuts:boundaries.map(v=>v+X0),
-       threshold:+thr.toFixed(1)
-     }
-   };
+   return {boxes,cuts:cuts.map(v=>band.x0+v)};
  }
 
- const s=splitRow("sys",rowDefs.sys);
- const a=splitRow("dia",rowDefs.dia);
- const p=splitRow("pulse",rowDefs.pulse);
+ const bands={
+   sys:findDigitBand("sys",rowDefs.sys),
+   dia:findDigitBand("dia",rowDefs.dia),
+   pulse:findDigitBand("pulse",rowDefs.pulse)
+ };
+
+ const s=splitBand("sys",bands.sys,3);
+ const a=splitBand("dia",bands.dia,2);
+ const p=splitBand("pulse",bands.pulse,2);
 
  DIGIT_BOXES={
    sys:s.boxes.map((b,i)=>({id:"s"+(i+1),label:"SYS"+(i+1),...b})),
@@ -1219,18 +1284,23 @@ function autoDetectDigitBoxesV26(){
 
  buildPresetOverlay();
 
- V33_GAP_DIAG={
+ V34_BAND_GAP_DIAG={
    threshold:+thr.toFixed(1),
-   sys:s.diag,
-   dia:a.diag,
-   pulse:p.diag
+   bands:{
+     sys:{x0:bands.sys.x0,x1:bands.sys.x1,y0:bands.sys.y0,y1:bands.sys.y1,peak:bands.sys.peak,score:bands.sys.score},
+     dia:{x0:bands.dia.x0,x1:bands.dia.x1,y0:bands.dia.y0,y1:bands.dia.y1,peak:bands.dia.peak,score:bands.dia.score},
+     pulse:{x0:bands.pulse.x0,x1:bands.pulse.x1,y0:bands.pulse.y0,y1:bands.pulse.y1,peak:bands.pulse.peak,score:bands.pulse.score}
+   },
+   cuts:{sys:s.cuts,dia:a.cuts,pulse:p.cuts}
  };
 
- $("status").textContent="V33：数字間の縦の空白を境界として桁を分離し、各セル内の数字本体へ青枠を合わせました。";
+ $("status").textContent="V34：各行の数字群の横帯を先に検出し、その帯の内部だけで桁間の空白を探して青枠を配置しました。";
  return DIGIT_BOXES;
 }
 
-let V33_GAP_DIAG=null;
+let V34_BAND_GAP_DIAG=null;
+
+
 
 let V26_MANUAL_OVERRIDE=false;
 $("autoBoxesBtn").onclick=()=>{
