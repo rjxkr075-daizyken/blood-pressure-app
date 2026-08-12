@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v32</title>
+<title>HEM-7271T 血圧フォト記録 v32 修正版</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -48,7 +48,7 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v32</h1>
+<h1>HEM-7271T 血圧フォト記録 v32 修正版</h1>
 <div class="sub">濃いLCDセグメント分離 + 形状判定（V23修正版2）</div>
 
 <div class="card">
@@ -76,7 +76,7 @@ svg{width:100%;height:230px;display:block}
  <div id="presetStage">
    <canvas id="presetCanvas" width="900" height="700"></canvas>
  </div>
- <div class="presetHint">V32では行を等分しません。補正後LCD内の濃い7セグメント形状を連結成分として抽出し、近接するセグメントを1個の数字へ統合して、数字本体の外接矩形を青枠にします。その後、位置関係からSYS3桁・DIA2桁・PULSE2桁へ割り当てます。</div>
+ <div class="presetHint">V32修正版では、分離した7セグメントを単純な連結成分のまま扱わず、同じ1文字セル内に収まるセグメントをまとめて1桁として扱います。細い「1」は細いまま、2・3・5・6・8・9・0のような離れたセグメントは1つの数字枠へ統合します。</div>
  <div class="row" style="margin-top:10px">
   <button id="autoBoxesBtn" class="secondary" disabled>桁位置を自動検出</button>
   <button id="readBtn" disabled>HEM-7271T専用解析</button>
@@ -140,7 +140,7 @@ const PAT={
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
 };
 
-const PRESET_KEY="bp_hem7271t_digit_preset_v32";
+const PRESET_KEY="bp_hem7271t_digit_preset_v32_fixed";
 const DEFAULT_DIGIT_BOXES={
  sys:[
   {id:"s1",label:"SYS1",x:.17,y:.18,w:.12,h:.31},
@@ -283,12 +283,12 @@ window.addEventListener("resize",()=>positionPreset());
 
 $("savePresetBtn").onclick=()=>{
  localStorage.setItem(PRESET_KEY,JSON.stringify(DIGIT_BOXES)); V26_MANUAL_OVERRIDE=true;
- $("status").textContent="V32桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
+ $("status").textContent="V32修正版 桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
 };
 $("resetPresetBtn").onclick=()=>{
  DIGIT_BOXES=structuredClone(DEFAULT_DIGIT_BOXES);
  buildPresetOverlay();
- $("status").textContent="桁位置をV32数字本体検出位置へ戻しました。";
+ $("status").textContent="桁位置をV32修正版 数字セル検出位置へ戻しました。";
 };
 
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
@@ -1161,128 +1161,170 @@ function autoDetectDigitBoxesV26(){
    const pieces=row.pieces.slice().sort((a,b)=>a.x0-b.x0);
    if(!pieces.length) return [];
 
-   // Merge segment pieces into digit candidates.
-   // Segments belonging to one digit may have large vertical gaps but strongly overlap in x.
-   let groups=[];
-   for(const c of pieces){
-     const cx=(c.x0+c.x1)/2;
-     let best=-1,bestScore=-1e9;
-     for(let i=0;i<groups.length;i++){
-       const g=groups[i];
-       const gx0=g.x0,gx1=g.x1;
-       const overlap=Math.max(0,Math.min(gx1,c.x1)-Math.max(gx0,c.x0)+1);
-       const minw=Math.max(1,Math.min(gx1-gx0+1,c.x1-c.x0+1));
-       const ov=overlap/minw;
-       const gcx=(gx0+gx1)/2;
-       const dx=Math.abs(cx-gcx)/W;
-       const score=ov*3-dx*10;
-       if((ov>.20 || dx<.035) && score>bestScore){
-         bestScore=score;best=i;
-       }
-     }
-     if(best<0){
-       groups.push({...c,pieces:[c]});
-     }else{
-       const g=groups[best];
-       g.x0=Math.min(g.x0,c.x0);g.x1=Math.max(g.x1,c.x1);
-       g.y0=Math.min(g.y0,c.y0);g.y1=Math.max(g.y1,c.y1);
-       g.n+=c.n;g.pieces.push(c);
-     }
-   }
+   // V32 fixed:
+   // Do not require 7-segment pieces to touch or strongly overlap in x.
+   // Instead, estimate "character cells" from x-center positions and merge all
+   // segment pieces that can belong to the same character cell.
+   const expectedCount=row.count;
 
-   // Second pass: join fragments with almost identical x-center.
-   let changed=true;
-   while(changed){
-     changed=false;
-     outer:
-     for(let i=0;i<groups.length;i++){
-       for(let j=i+1;j<groups.length;j++){
-         const a=groups[i],b=groups[j];
-         const ac=(a.x0+a.x1)/2,bc=(b.x0+b.x1)/2;
-         const dx=Math.abs(ac-bc)/W;
-         const overlap=Math.max(0,Math.min(a.x1,b.x1)-Math.max(a.x0,b.x0)+1);
-         const minw=Math.max(1,Math.min(a.x1-a.x0+1,b.x1-b.x0+1));
-         if(dx<.025 || overlap/minw>.35){
-           const m={
-             x0:Math.min(a.x0,b.x0),x1:Math.max(a.x1,b.x1),
-             y0:Math.min(a.y0,b.y0),y1:Math.max(a.y1,b.y1),
-             n:a.n+b.n,pieces:[...(a.pieces||[]),...(b.pieces||[])]
-           };
-           groups.splice(j,1);groups.splice(i,1,m);
-           changed=true;break outer;
-         }
-       }
-     }
-   }
-
-   // Filter implausible groups.
-   groups=groups.filter(g=>{
-     const w=(g.x1-g.x0+1)/W,h=(g.y1-g.y0+1)/H;
-     return w>=.012 && w<=.16 && h>=.05 && h<=.31;
+   const filtered=pieces.filter(c=>{
+     const w=(c.x1-c.x0+1)/W;
+     const h=(c.y1-c.y0+1)/H;
+     const cx=((c.x0+c.x1)/2)/W;
+     // hard exclude left labels / far-right bar remnants
+     return w>=.006 && w<=.17 && h>=.010 && h<=.32 &&
+            cx>=.18 && cx<=.64;
    });
 
-   // Sort and choose the strongest sequence matching expected count.
-   groups.sort((a,b)=>a.x0-b.x0);
+   if(!filtered.length) return [];
 
-   // If too many, score contiguous subsets by darkness + expected spacing.
-   if(groups.length>row.count){
-     let best=null,bestScore=-1e9;
-     for(let i=0;i<=groups.length-row.count;i++){
-       const sub=groups.slice(i,i+row.count);
-       const first=sub[0],last=sub[sub.length-1];
-       const span=(last.x1-first.x0+1)/W;
-       const targetSpan=name==="sys"?.30:.20;
-       const ink=sub.reduce((s,g)=>s+g.n,0)/(W*H);
-       let gaps=0;
-       for(let k=0;k<sub.length-1;k++){
-         gaps+=Math.max(0,sub[k+1].x0-sub[k].x1)/W;
-       }
-       const score=ink*100 - Math.abs(span-targetSpan)*4 - gaps*.5;
-       if(score>bestScore){bestScore=score;best=sub}
-     }
-     if(best)groups=best;
+   // Build x-density of all segment pieces in this row.
+   let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+   for(const c of filtered){
+     minX=Math.min(minX,c.x0);maxX=Math.max(maxX,c.x1);
+     minY=Math.min(minY,c.y0);maxY=Math.max(maxY,c.y1);
    }
 
-   // If not enough digit groups, fall back only inside the measured row pieces.
-   if(groups.length!==row.count){
-     let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
-     for(const c of pieces){
-       minX=Math.min(minX,c.x0);maxX=Math.max(maxX,c.x1);
-       minY=Math.min(minY,c.y0);maxY=Math.max(maxY,c.y1);
+   // Estimate likely digit centers from weighted piece centers.
+   // Horizontal bars are wide and therefore naturally pull toward the true
+   // center of 2/3/5/6/8/9/0; thin vertical bars represent "1".
+   const samples=filtered.map(c=>{
+     const cx=(c.x0+c.x1)/2;
+     const w=Math.max(1,c.x1-c.x0+1);
+     const h=Math.max(1,c.y1-c.y0+1);
+     const area=Math.max(1,c.n||w*h);
+     const horiz = w/h;
+     const weight = Math.max(1, area*(horiz>1.25?1.8:1.0));
+     return {cx,weight,c};
+   }).sort((a,b)=>a.cx-b.cx);
+
+   // Initial center guesses from row span, then refine to nearby weighted pieces.
+   const span=Math.max(1,maxX-minX+1);
+   let centers=[];
+   for(let i=0;i<expectedCount;i++){
+     centers.push(minX + span*(i+.5)/expectedCount);
+   }
+
+   // K-means-like 1D refinement, but constrain ordering and prevent collapse.
+   for(let iter=0;iter<10;iter++){
+     const buckets=Array.from({length:expectedCount},()=>[]);
+     for(const s of samples){
+       let bi=0,bd=Infinity;
+       for(let i=0;i<centers.length;i++){
+         const dd=Math.abs(s.cx-centers[i]);
+         if(dd<bd){bd=dd;bi=i}
+       }
+       buckets[bi].push(s);
      }
-     if(!isFinite(minX)){
-       const fb={
-         sys:[.22,.60,.16,.43],
-         dia:[.29,.60,.42,.69],
-         pulse:[.38,.63,.69,.90]
-       }[name];
-       minX=W*fb[0];maxX=W*fb[1];minY=H*fb[2];maxY=H*fb[3];
+     const next=centers.slice();
+     for(let i=0;i<expectedCount;i++){
+       if(!buckets[i].length)continue;
+       let sw=0,sx=0;
+       for(const s of buckets[i]){sw+=s.weight;sx+=s.cx*s.weight}
+       next[i]=sx/sw;
      }
-     groups=[];
-     const span=maxX-minX+1;
-     for(let i=0;i<row.count;i++){
+     next.sort((a,b)=>a-b);
+
+     // enforce a small minimum spacing so neighboring digits cannot collapse
+     const minSep=W*(name==="sys"?.055:.065);
+     for(let i=1;i<next.length;i++){
+       if(next[i]-next[i-1]<minSep){
+         const mid=(next[i]+next[i-1])/2;
+         next[i-1]=mid-minSep/2;
+         next[i]=mid+minSep/2;
+       }
+     }
+     centers=next;
+   }
+
+   // Character-cell boundaries halfway between centers.
+   const bounds=[minX];
+   for(let i=0;i<centers.length-1;i++)bounds.push((centers[i]+centers[i+1])/2);
+   bounds.push(maxX);
+
+   let groups=[];
+   for(let i=0;i<expectedCount;i++){
+     let a=bounds[i],b=bounds[i+1];
+     const members=filtered.filter(c=>{
+       const cx=(c.x0+c.x1)/2;
+       return cx>=a && cx<=b;
+     });
+
+     if(members.length){
+       let gx0=Infinity,gx1=-Infinity,gy0=Infinity,gy1=-Infinity,n=0;
+       for(const c of members){
+         gx0=Math.min(gx0,c.x0);gx1=Math.max(gx1,c.x1);
+         gy0=Math.min(gy0,c.y0);gy1=Math.max(gy1,c.y1);
+         n+=c.n||0;
+       }
+
+       // A 7-seg digit can have separated upper/lower pieces.
+       // Keep the whole vertical envelope of the row so "2" is not split.
+       gy0=Math.min(gy0,minY);
+       gy1=Math.max(gy1,maxY);
+
+       groups.push({x0:gx0,x1:gx1,y0:gy0,y1:gy1,n,pieces:members});
+     }else{
        groups.push({
-         x0:minX+span*i/row.count,
-         x1:minX+span*(i+1)/row.count,
-         y0:minY,y1:maxY,n:0,pieces:[]
+         x0:a,x1:b,y0:minY,y1:maxY,n:0,pieces:[]
        });
      }
    }
 
-   // Expand each true digit bounding box slightly.
-   const padX=Math.round(W*.012);
-   const padY=Math.round(H*.014);
-   return groups
-     .sort((a,b)=>a.x0-b.x0)
-     .map(g=>{
-       const x0=Math.max(rx0,Math.round(g.x0-padX));
-       const x1=Math.min(rx1-1,Math.round(g.x1+padX));
-       const y0=Math.max(ry0,Math.round(g.y0-padY));
-       const y1=Math.min(ry1-1,Math.round(g.y1+padY));
-       return {x:x0/W,y:y0/H,w:(x1-x0+1)/W,h:(y1-y0+1)/H};
-     });
- }
+   // Repair suspiciously narrow/empty non-"1" cells by borrowing nearby
+   // segment pieces whose center is just outside the boundary.
+   const rowHeight=Math.max(1,maxY-minY+1);
+   groups=groups.map((g,i)=>{
+     let gx0=g.x0,gx1=g.x1;
+     const gw=(gx1-gx0+1)/W;
+     const memberCount=g.pieces.length;
 
+     // True "1" is allowed to remain narrow if it contains mainly vertical pieces.
+     let verticalish=0,horizontalish=0;
+     for(const c of g.pieces){
+       const cw=c.x1-c.x0+1, ch=c.y1-c.y0+1;
+       if(ch>cw*1.35) verticalish++;
+       if(cw>ch*1.25) horizontalish++;
+     }
+     const looksLikeOne = memberCount>0 && verticalish>=horizontalish && gw<.075;
+
+     if(!looksLikeOne && (memberCount==0 || gw<.045)){
+       const target=centers[i];
+       const extra=filtered.filter(c=>{
+         const cx=(c.x0+c.x1)/2;
+         return Math.abs(cx-target)<W*.070;
+       });
+       for(const c of extra){
+         gx0=Math.min(gx0,c.x0);gx1=Math.max(gx1,c.x1);
+       }
+     }
+
+     return {...g,x0:gx0,x1:gx1,y0:minY,y1:maxY};
+   });
+
+   // Expand each digit according to its actual width.
+   // Narrow "1" receives only a small side pad; wider digits receive normal pad.
+   return groups.map((g,i)=>{
+     const rawW=(g.x1-g.x0+1)/W;
+     let verticalish=0,horizontalish=0;
+     for(const c of g.pieces){
+       const cw=c.x1-c.x0+1, ch=c.y1-c.y0+1;
+       if(ch>cw*1.35) verticalish++;
+       if(cw>ch*1.25) horizontalish++;
+     }
+     const looksLikeOne = g.pieces.length>0 && verticalish>=horizontalish && rawW<.075;
+
+     const padX=Math.round(W*(looksLikeOne?.008:.016));
+     const padY=Math.round(H*.016);
+
+     const x0=Math.max(rx0,Math.round(g.x0-padX));
+     const x1=Math.min(rx1-1,Math.round(g.x1+padX));
+     const y0=Math.max(ry0,Math.round(g.y0-padY));
+     const y1=Math.min(ry1-1,Math.round(g.y1+padY));
+
+     return {x:x0/W,y:y0/H,w:(x1-x0+1)/W,h:(y1-y0+1)/H};
+   });
+ }
  const sys=clusterDigits("sys",rows.sys);
  const dia=clusterDigits("dia",rows.dia);
  const pulse=clusterDigits("pulse",rows.pulse);
@@ -1295,7 +1337,7 @@ function autoDetectDigitBoxesV26(){
 
  buildPresetOverlay();
 
- V32_OBJECT_DIAG={
+ V32_FIXED_DIAG={
    threshold:thr.toFixed(1),
    components:comps.length,
    rowPieces:{
@@ -1310,11 +1352,11 @@ function autoDetectDigitBoxesV26(){
    }
  };
 
- $("status").textContent="V32：7セグメント形状を数字ごとにまとめ、数字本体の外接矩形へ青枠を配置しました。";
+ $("status").textContent="V32修正版：同じ1文字セルに属する分離セグメントを統合して青枠を配置しました。";
  return DIGIT_BOXES;
 }
 
-let V32_OBJECT_DIAG=null;
+let V32_FIXED_DIAG=null;
 
 let V26_MANUAL_OVERRIDE=false;
 $("autoBoxesBtn").onclick=()=>{
