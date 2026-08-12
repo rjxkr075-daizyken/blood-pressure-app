@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v32 修正版</title>
+<title>HEM-7271T 血圧フォト記録 v33</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -48,7 +48,7 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v32 修正版</h1>
+<h1>HEM-7271T 血圧フォト記録 v33</h1>
 <div class="sub">濃いLCDセグメント分離 + 形状判定（V23修正版2）</div>
 
 <div class="card">
@@ -76,7 +76,7 @@ svg{width:100%;height:230px;display:block}
  <div id="presetStage">
    <canvas id="presetCanvas" width="900" height="700"></canvas>
  </div>
- <div class="presetHint">V32修正版では、分離した7セグメントを単純な連結成分のまま扱わず、同じ1文字セル内に収まるセグメントをまとめて1桁として扱います。細い「1」は細いまま、2・3・5・6・8・9・0のような離れたセグメントは1つの数字枠へ統合します。</div>
+ <div class="presetHint">V33では7セグメント同士を結合して数字を推定しません。SYS・DIA・PULSE各行の縦方向の黒画素量を調べ、数字と数字の間にある空白の谷を境界として3桁・2桁・2桁へ分割します。その後、各セル内の黒い数字本体だけを再トリミングして青枠にします。</div>
  <div class="row" style="margin-top:10px">
   <button id="autoBoxesBtn" class="secondary" disabled>桁位置を自動検出</button>
   <button id="readBtn" disabled>HEM-7271T専用解析</button>
@@ -140,7 +140,7 @@ const PAT={
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
 };
 
-const PRESET_KEY="bp_hem7271t_digit_preset_v32_fixed";
+const PRESET_KEY="bp_hem7271t_digit_preset_v33";
 const DEFAULT_DIGIT_BOXES={
  sys:[
   {id:"s1",label:"SYS1",x:.17,y:.18,w:.12,h:.31},
@@ -283,12 +283,12 @@ window.addEventListener("resize",()=>positionPreset());
 
 $("savePresetBtn").onclick=()=>{
  localStorage.setItem(PRESET_KEY,JSON.stringify(DIGIT_BOXES)); V26_MANUAL_OVERRIDE=true;
- $("status").textContent="V32修正版 桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
+ $("status").textContent="V33 桁位置プリセットを保存しました。画面上の7個の青枠と同じ範囲をそのまま認識に使用します。";
 };
 $("resetPresetBtn").onclick=()=>{
  DIGIT_BOXES=structuredClone(DEFAULT_DIGIT_BOXES);
  buildPresetOverlay();
- $("status").textContent="桁位置をV32修正版 数字セル検出位置へ戻しました。";
+ $("status").textContent="桁位置をV33 空白境界検出位置へ戻しました。";
 };
 
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
@@ -1040,323 +1040,197 @@ function autoDetectDigitBoxesV26(){
    return .299*d[i]+.587*d[i+1]+.114*d[i+2];
  };
 
- // LCD number field only.
- // Left printed labels and right pressure bar are excluded.
- const rx0=Math.round(W*.16), rx1=Math.round(W*.67);
- const ry0=Math.round(H*.12), ry1=Math.round(H*.93);
+ // LCD numeric field only: exclude left printed labels and right pressure bar.
+ const X0=Math.round(W*.17), X1=Math.round(W*.67);
 
- // Estimate threshold from the number field itself.
- const samp=[];
- for(let y=ry0;y<ry1;y+=2){
-   for(let x=rx0;x<rx1;x+=2) samp.push(lum(x,y));
- }
- samp.sort((a,b)=>a-b);
- const q12=samp[Math.floor(samp.length*.12)] ?? 80;
- const q45=samp[Math.floor(samp.length*.45)] ?? 150;
- const thr=Math.max(65,Math.min(145,q12+(q45-q12)*.38));
-
- const bw=rx1-rx0,bh=ry1-ry0;
- const mask=new Uint8Array(bw*bh);
-
- for(let y=0;y<bh;y++){
-   for(let x=0;x<bw;x++){
-     mask[y*bw+x] = lum(rx0+x,ry0+y)<thr ? 1 : 0;
-   }
- }
-
- // Light morphology: connect small breaks inside LCD segments without
- // joining neighboring digits.
- const tmp=new Uint8Array(mask.length);
- const radX=Math.max(1,Math.round(W*.003));
- const radY=Math.max(1,Math.round(H*.002));
-
- for(let y=0;y<bh;y++){
-   for(let x=0;x<bw;x++){
-     let on=0;
-     for(let dx=-radX;dx<=radX && !on;dx++){
-       const xx=x+dx;
-       if(xx>=0&&xx<bw&&mask[y*bw+xx]) on=1;
-     }
-     tmp[y*bw+x]=on;
-   }
- }
- const mor=new Uint8Array(mask.length);
- for(let y=0;y<bh;y++){
-   for(let x=0;x<bw;x++){
-     let on=0;
-     for(let dy=-radY;dy<=radY && !on;dy++){
-       const yy=y+dy;
-       if(yy>=0&&yy<bh&&tmp[yy*bw+x]) on=1;
-     }
-     mor[y*bw+x]=on;
-   }
- }
-
- // Connected components of dark LCD pieces.
- const seen=new Uint8Array(mor.length);
- const comps=[];
- const stackX=new Int32Array(mor.length);
- const stackY=new Int32Array(mor.length);
-
- for(let sy=0;sy<bh;sy++){
-   for(let sx=0;sx<bw;sx++){
-     const si=sy*bw+sx;
-     if(!mor[si]||seen[si]) continue;
-
-     let sp=0;
-     stackX[sp]=sx; stackY[sp]=sy; sp++;
-     seen[si]=1;
-     let minX=sx,maxX=sx,minY=sy,maxY=sy,n=0;
-
-     while(sp){
-       sp--;
-       const x=stackX[sp],y=stackY[sp];
-       n++;
-       if(x<minX)minX=x;if(x>maxX)maxX=x;
-       if(y<minY)minY=y;if(y>maxY)maxY=y;
-
-       const nb=[[x-1,y],[x+1,y],[x,y-1],[x,y+1]];
-       for(const [xx,yy] of nb){
-         if(xx<0||xx>=bw||yy<0||yy>=bh)continue;
-         const ii=yy*bw+xx;
-         if(mor[ii]&&!seen[ii]){
-           seen[ii]=1;
-           stackX[sp]=xx;stackY[sp]=yy;sp++;
-         }
-       }
-     }
-
-     const cw=maxX-minX+1,ch=maxY-minY+1;
-     // Keep segment-like pieces, reject specks and long border/print artifacts.
-     if(n>=Math.max(8,W*H*.00002) &&
-        cw>=W*.008 && ch>=H*.012 &&
-        cw<=W*.20 && ch<=H*.30){
-       comps.push({
-         x0:minX+rx0,x1:maxX+rx0,
-         y0:minY+ry0,y1:maxY+ry0,
-         n
-       });
-     }
-   }
- }
-
- // Assign pieces to one of the three numeric rows by vertical center.
- const rows={
-   sys:{cy:.30,pieces:[],count:3},
-   dia:{cy:.56,pieces:[],count:2},
-   pulse:{cy:.79,pieces:[],count:2}
+ // Row bands in rectified LCD coordinates.
+ // These are deliberately broad; the actual top/bottom is refined from ink.
+ const rowDefs={
+   sys:{y0:.17,y1:.45,count:3},
+   dia:{y0:.40,y1:.70,count:2},
+   pulse:{y0:.67,y1:.93,count:2}
  };
 
- for(const c of comps){
-   const cy=((c.y0+c.y1)/2)/H;
-   let best=null,dist=1e9;
-   for(const [name,r] of Object.entries(rows)){
-     const dd=Math.abs(cy-r.cy);
-     if(dd<dist){dist=dd;best=name}
+ // Global dark threshold from numeric area.
+ const vals=[];
+ for(let y=Math.round(H*.12);y<Math.round(H*.93);y+=2){
+   for(let x=X0;x<X1;x+=2) vals.push(lum(x,y));
+ }
+ vals.sort((a,b)=>a-b);
+ const q15=vals[Math.floor(vals.length*.15)] ?? 90;
+ const q55=vals[Math.floor(vals.length*.55)] ?? 155;
+ const thr=Math.max(70,Math.min(150,q15+(q55-q15)*.42));
+
+ function smooth(arr,r=4){
+   const out=new Float32Array(arr.length);
+   for(let i=0;i<arr.length;i++){
+     let s=0,n=0;
+     for(let k=-r;k<=r;k++){
+       const j=i+k;
+       if(j>=0&&j<arr.length){s+=arr[j];n++}
+     }
+     out[i]=n?s/n:0;
    }
-   if(dist<.19) rows[best].pieces.push(c);
+   return out;
  }
 
- function clusterDigits(name,row){
-   const pieces=row.pieces.slice().sort((a,b)=>a.x0-b.x0);
-   if(!pieces.length) return [];
-
-   // V32 fixed:
-   // Do not require 7-segment pieces to touch or strongly overlap in x.
-   // Instead, estimate "character cells" from x-center positions and merge all
-   // segment pieces that can belong to the same character cell.
-   const expectedCount=row.count;
-
-   const filtered=pieces.filter(c=>{
-     const w=(c.x1-c.x0+1)/W;
-     const h=(c.y1-c.y0+1)/H;
-     const cx=((c.x0+c.x1)/2)/W;
-     // hard exclude left labels / far-right bar remnants
-     return w>=.006 && w<=.17 && h>=.010 && h<=.32 &&
-            cx>=.18 && cx<=.64;
-   });
-
-   if(!filtered.length) return [];
-
-   // Build x-density of all segment pieces in this row.
-   let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
-   for(const c of filtered){
-     minX=Math.min(minX,c.x0);maxX=Math.max(maxX,c.x1);
-     minY=Math.min(minY,c.y0);maxY=Math.max(maxY,c.y1);
-   }
-
-   // Estimate likely digit centers from weighted piece centers.
-   // Horizontal bars are wide and therefore naturally pull toward the true
-   // center of 2/3/5/6/8/9/0; thin vertical bars represent "1".
-   const samples=filtered.map(c=>{
-     const cx=(c.x0+c.x1)/2;
-     const w=Math.max(1,c.x1-c.x0+1);
-     const h=Math.max(1,c.y1-c.y0+1);
-     const area=Math.max(1,c.n||w*h);
-     const horiz = w/h;
-     const weight = Math.max(1, area*(horiz>1.25?1.8:1.0));
-     return {cx,weight,c};
-   }).sort((a,b)=>a.cx-b.cx);
-
-   // Initial center guesses from row span, then refine to nearby weighted pieces.
-   const span=Math.max(1,maxX-minX+1);
-   let centers=[];
-   for(let i=0;i<expectedCount;i++){
-     centers.push(minX + span*(i+.5)/expectedCount);
-   }
-
-   // K-means-like 1D refinement, but constrain ordering and prevent collapse.
-   for(let iter=0;iter<10;iter++){
-     const buckets=Array.from({length:expectedCount},()=>[]);
-     for(const s of samples){
-       let bi=0,bd=Infinity;
-       for(let i=0;i<centers.length;i++){
-         const dd=Math.abs(s.cx-centers[i]);
-         if(dd<bd){bd=dd;bi=i}
-       }
-       buckets[bi].push(s);
-     }
-     const next=centers.slice();
-     for(let i=0;i<expectedCount;i++){
-       if(!buckets[i].length)continue;
-       let sw=0,sx=0;
-       for(const s of buckets[i]){sw+=s.weight;sx+=s.cx*s.weight}
-       next[i]=sx/sw;
-     }
-     next.sort((a,b)=>a-b);
-
-     // enforce a small minimum spacing so neighboring digits cannot collapse
-     const minSep=W*(name==="sys"?.055:.065);
-     for(let i=1;i<next.length;i++){
-       if(next[i]-next[i-1]<minSep){
-         const mid=(next[i]+next[i-1])/2;
-         next[i-1]=mid-minSep/2;
-         next[i]=mid+minSep/2;
+ function findInkBounds(x0,x1,y0,y1){
+   let minX=x1,maxX=x0,minY=y1,maxY=y0,found=false;
+   for(let y=y0;y<=y1;y++){
+     for(let x=x0;x<=x1;x++){
+       if(lum(x,y)<thr){
+         found=true;
+         if(x<minX)minX=x;if(x>maxX)maxX=x;
+         if(y<minY)minY=y;if(y>maxY)maxY=y;
        }
      }
-     centers=next;
+   }
+   if(!found) return null;
+   return {x0:minX,x1:maxX,y0:minY,y1:maxY};
+ }
+
+ function splitRow(name,def){
+   const y0=Math.max(0,Math.round(H*def.y0));
+   const y1=Math.min(H-1,Math.round(H*def.y1));
+   const w=X1-X0+1;
+   const prof=new Float32Array(w);
+
+   // Vertical dark-pixel projection.
+   for(let x=X0;x<=X1;x++){
+     let dark=0,total=0;
+     for(let y=y0;y<=y1;y++){
+       const L=lum(x,y);
+       if(L<thr) dark++;
+       total++;
+     }
+     prof[x-X0]=dark/Math.max(1,total);
    }
 
-   // Character-cell boundaries halfway between centers.
-   const bounds=[minX];
-   for(let i=0;i<centers.length-1;i++)bounds.push((centers[i]+centers[i+1])/2);
-   bounds.push(maxX);
+   const sm=smooth(prof,Math.max(2,Math.round(W*.004)));
 
-   let groups=[];
-   for(let i=0;i<expectedCount;i++){
-     let a=bounds[i],b=bounds[i+1];
-     const members=filtered.filter(c=>{
-       const cx=(c.x0+c.x1)/2;
-       return cx>=a && cx<=b;
-     });
+   // Find active x span first, ignoring tiny noise.
+   let peak=0;
+   for(const v of sm) if(v>peak) peak=v;
+   const activeThr=Math.max(.015,peak*.12);
 
-     if(members.length){
-       let gx0=Infinity,gx1=-Infinity,gy0=Infinity,gy1=-Infinity,n=0;
-       for(const c of members){
-         gx0=Math.min(gx0,c.x0);gx1=Math.max(gx1,c.x1);
-         gy0=Math.min(gy0,c.y0);gy1=Math.max(gy1,c.y1);
-         n+=c.n||0;
+   let ax0=0,ax1=w-1;
+   while(ax0<w-1 && sm[ax0]<activeThr) ax0++;
+   while(ax1>0 && sm[ax1]<activeThr) ax1--;
+
+   // Guard against accidental collapse.
+   if(ax1-ax0 < W*.12){
+     ax0=Math.round(w*.08);
+     ax1=Math.round(w*.92);
+   }
+
+   const span=ax1-ax0+1;
+   const boundaries=[];
+
+   // For N digits, seek N-1 minima near expected inter-digit positions.
+   // This uses "blank valleys", not segment connectivity.
+   for(let cut=1;cut<def.count;cut++){
+     const expected=ax0 + span*cut/def.count;
+     const searchHalf=Math.max(8,Math.round(span*.20));
+     let lo=Math.max(ax0+4,Math.round(expected-searchHalf));
+     let hi=Math.min(ax1-4,Math.round(expected+searchHalf));
+
+     let best=expected,bestScore=1e9;
+     for(let i=lo;i<=hi;i++){
+       // local valley score with a little penalty for drifting far from expected
+       let local=0,n=0;
+       for(let k=-3;k<=3;k++){
+         const j=i+k;
+         if(j>=0&&j<sm.length){local+=sm[j];n++}
        }
+       local/=Math.max(1,n);
+       const drift=Math.abs(i-expected)/Math.max(1,span);
+       const score=local + drift*.10;
+       if(score<bestScore){bestScore=score;best=i}
+     }
+     boundaries.push(best);
+   }
 
-       // A 7-seg digit can have separated upper/lower pieces.
-       // Keep the whole vertical envelope of the row so "2" is not split.
-       gy0=Math.min(gy0,minY);
-       gy1=Math.max(gy1,maxY);
+   boundaries.sort((a,b)=>a-b);
 
-       groups.push({x0:gx0,x1:gx1,y0:gy0,y1:gy1,n,pieces:members});
+   // Prevent collapsed neighboring cells.
+   const minCell=Math.max(8,Math.round(span*(def.count===3?.12:.18)));
+   for(let i=1;i<boundaries.length;i++){
+     if(boundaries[i]-boundaries[i-1]<minCell){
+       const mid=(boundaries[i]+boundaries[i-1])/2;
+       boundaries[i-1]=Math.round(mid-minCell/2);
+       boundaries[i]=Math.round(mid+minCell/2);
+     }
+   }
+
+   const edges=[ax0,...boundaries,ax1];
+   const boxes=[];
+
+   for(let i=0;i<def.count;i++){
+     let cx0=X0+edges[i];
+     let cx1=X0+edges[i+1];
+
+     // Keep a tiny margin away from neighboring cell.
+     const inset=Math.max(1,Math.round(W*.003));
+     if(i>0) cx0+=inset;
+     if(i<def.count-1) cx1-=inset;
+
+     let ink=findInkBounds(cx0,cx1,y0,y1);
+
+     if(!ink){
+       ink={x0:cx0,x1:cx1,y0:y0,y1:y1};
      }else{
-       groups.push({
-         x0:a,x1:b,y0:minY,y1:maxY,n:0,pieces:[]
-       });
+       // Remove isolated noise by repeatedly trimming empty borders.
+       const px=Math.max(2,Math.round(W*.008));
+       const py=Math.max(2,Math.round(H*.010));
+       ink.x0=Math.max(cx0,ink.x0-px);
+       ink.x1=Math.min(cx1,ink.x1+px);
+       ink.y0=Math.max(y0,ink.y0-py);
+       ink.y1=Math.min(y1,ink.y1+py);
      }
+
+     boxes.push({
+       x:ink.x0/W,
+       y:ink.y0/H,
+       w:(ink.x1-ink.x0+1)/W,
+       h:(ink.y1-ink.y0+1)/H
+     });
    }
 
-   // Repair suspiciously narrow/empty non-"1" cells by borrowing nearby
-   // segment pieces whose center is just outside the boundary.
-   const rowHeight=Math.max(1,maxY-minY+1);
-   groups=groups.map((g,i)=>{
-     let gx0=g.x0,gx1=g.x1;
-     const gw=(gx1-gx0+1)/W;
-     const memberCount=g.pieces.length;
-
-     // True "1" is allowed to remain narrow if it contains mainly vertical pieces.
-     let verticalish=0,horizontalish=0;
-     for(const c of g.pieces){
-       const cw=c.x1-c.x0+1, ch=c.y1-c.y0+1;
-       if(ch>cw*1.35) verticalish++;
-       if(cw>ch*1.25) horizontalish++;
+   return {
+     boxes,
+     diag:{
+       peak:+peak.toFixed(4),
+       active:[ax0,ax1],
+       cuts:boundaries.map(v=>v+X0),
+       threshold:+thr.toFixed(1)
      }
-     const looksLikeOne = memberCount>0 && verticalish>=horizontalish && gw<.075;
-
-     if(!looksLikeOne && (memberCount==0 || gw<.045)){
-       const target=centers[i];
-       const extra=filtered.filter(c=>{
-         const cx=(c.x0+c.x1)/2;
-         return Math.abs(cx-target)<W*.070;
-       });
-       for(const c of extra){
-         gx0=Math.min(gx0,c.x0);gx1=Math.max(gx1,c.x1);
-       }
-     }
-
-     return {...g,x0:gx0,x1:gx1,y0:minY,y1:maxY};
-   });
-
-   // Expand each digit according to its actual width.
-   // Narrow "1" receives only a small side pad; wider digits receive normal pad.
-   return groups.map((g,i)=>{
-     const rawW=(g.x1-g.x0+1)/W;
-     let verticalish=0,horizontalish=0;
-     for(const c of g.pieces){
-       const cw=c.x1-c.x0+1, ch=c.y1-c.y0+1;
-       if(ch>cw*1.35) verticalish++;
-       if(cw>ch*1.25) horizontalish++;
-     }
-     const looksLikeOne = g.pieces.length>0 && verticalish>=horizontalish && rawW<.075;
-
-     const padX=Math.round(W*(looksLikeOne?.008:.016));
-     const padY=Math.round(H*.016);
-
-     const x0=Math.max(rx0,Math.round(g.x0-padX));
-     const x1=Math.min(rx1-1,Math.round(g.x1+padX));
-     const y0=Math.max(ry0,Math.round(g.y0-padY));
-     const y1=Math.min(ry1-1,Math.round(g.y1+padY));
-
-     return {x:x0/W,y:y0/H,w:(x1-x0+1)/W,h:(y1-y0+1)/H};
-   });
+   };
  }
- const sys=clusterDigits("sys",rows.sys);
- const dia=clusterDigits("dia",rows.dia);
- const pulse=clusterDigits("pulse",rows.pulse);
+
+ const s=splitRow("sys",rowDefs.sys);
+ const a=splitRow("dia",rowDefs.dia);
+ const p=splitRow("pulse",rowDefs.pulse);
 
  DIGIT_BOXES={
-   sys:sys.map((b,i)=>({id:"s"+(i+1),label:"SYS"+(i+1),...b})),
-   dia:dia.map((b,i)=>({id:"d"+(i+1),label:"DIA"+(i+1),...b})),
-   pulse:pulse.map((b,i)=>({id:"p"+(i+1),label:"P"+(i+1),...b}))
+   sys:s.boxes.map((b,i)=>({id:"s"+(i+1),label:"SYS"+(i+1),...b})),
+   dia:a.boxes.map((b,i)=>({id:"d"+(i+1),label:"DIA"+(i+1),...b})),
+   pulse:p.boxes.map((b,i)=>({id:"p"+(i+1),label:"P"+(i+1),...b}))
  };
 
  buildPresetOverlay();
 
- V32_FIXED_DIAG={
-   threshold:thr.toFixed(1),
-   components:comps.length,
-   rowPieces:{
-     sys:rows.sys.pieces.length,
-     dia:rows.dia.pieces.length,
-     pulse:rows.pulse.pieces.length
-   },
-   boxes:{
-     sys:sys.map(b=>[b.x.toFixed(3),b.y.toFixed(3),b.w.toFixed(3),b.h.toFixed(3)]),
-     dia:dia.map(b=>[b.x.toFixed(3),b.y.toFixed(3),b.w.toFixed(3),b.h.toFixed(3)]),
-     pulse:pulse.map(b=>[b.x.toFixed(3),b.y.toFixed(3),b.w.toFixed(3),b.h.toFixed(3)])
-   }
+ V33_GAP_DIAG={
+   threshold:+thr.toFixed(1),
+   sys:s.diag,
+   dia:a.diag,
+   pulse:p.diag
  };
 
- $("status").textContent="V32修正版：同じ1文字セルに属する分離セグメントを統合して青枠を配置しました。";
+ $("status").textContent="V33：数字間の縦の空白を境界として桁を分離し、各セル内の数字本体へ青枠を合わせました。";
  return DIGIT_BOXES;
 }
 
-let V32_FIXED_DIAG=null;
+let V33_GAP_DIAG=null;
 
 let V26_MANUAL_OVERRIDE=false;
 $("autoBoxesBtn").onclick=()=>{
