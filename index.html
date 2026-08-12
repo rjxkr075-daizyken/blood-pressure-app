@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v16</title>
+<title>HEM-7271T 血圧フォト記録 v17</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -41,13 +41,14 @@ svg{width:100%;height:230px;display:block}
 .presetBox{position:absolute;border:2px solid #2563eb;background:#2563eb18;border-radius:8px;touch-action:none}
 .presetBox span{position:absolute;left:2px;top:2px;background:#2563eb;color:#fff;border-radius:5px;padding:2px 5px;font-size:10px;font-weight:700}
 .presetBox.selected{border-color:#dc2626;background:#dc262618}
+.resizeHandle{position:absolute;right:-8px;bottom:-8px;width:22px;height:22px;border-radius:50%;background:#dc2626;border:3px solid #fff;box-shadow:0 1px 5px #0004;touch-action:none}
 @media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v16</h1>
-<div class="sub">HEM-7271T専用プリセット校正 + 保存</div>
+<h1>HEM-7271T 血圧フォト記録 v17</h1>
+<div class="sub">青枠の移動・サイズ変更 + 部分認識表示</div>
 
 <div class="card">
  <div class="row">
@@ -69,7 +70,7 @@ svg{width:100%;height:230px;display:block}
 
 <div class="card">
  <strong>HEM-7271T 桁位置プリセット</strong>
- <div class="sub">最初の1回だけ、7個の青枠を実際の数字に合わせて保存します。次回以降は自動で呼び出します。</div>
+ <div class="sub">最初の1回だけ、7個の青枠を各数字に合わせます。枠は移動だけでなく右下の赤丸で大きさも変更できます。保存後は次回から自動で呼び出します。</div>
  <div id="presetStage" style="display:none"><canvas id="presetCanvas" width="900" height="700"></canvas></div>
  <div class="row" style="margin-top:10px">
   <button id="readBtn" disabled>HEM-7271T専用解析</button>
@@ -132,7 +133,7 @@ const PAT={
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
 };
 
-const PRESET_KEY="bp_hem7271t_digit_preset_v16";
+const PRESET_KEY="bp_hem7271t_digit_preset_v17";
 const DEFAULT_DIGIT_BOXES={
  sys:[
   {id:"s1",label:"SYS1",x:.17,y:.18,w:.12,h:.31},
@@ -177,21 +178,65 @@ function buildPresetOverlay(){
  stage.style.display="block";
  [...stage.querySelectorAll(".presetBox")].forEach(x=>x.remove());
  const flat=flatPreset();
+
  flat.forEach((b,i)=>{
-   const d=document.createElement("div"); d.className="presetBox"; d.dataset.i=i;
-   const s=document.createElement("span"); s.textContent=b.label; d.appendChild(s); stage.appendChild(d);
+   const d=document.createElement("div");
+   d.className="presetBox";
+   d.dataset.i=i;
+
+   const s=document.createElement("span");
+   s.textContent=b.label;
+   d.appendChild(s);
+
+   const rh=document.createElement("div");
+   rh.className="resizeHandle";
+   d.appendChild(rh);
+
+   stage.appendChild(d);
+
+   // Move box
    d.onpointerdown=e=>{
-     e.preventDefault(); d.setPointerCapture(e.pointerId);
-     [...stage.querySelectorAll(".presetBox")].forEach(x=>x.classList.remove("selected")); d.classList.add("selected");
+     if(e.target===rh)return;
+     e.preventDefault();
+     d.setPointerCapture(e.pointerId);
+     [...stage.querySelectorAll(".presetBox")].forEach(x=>x.classList.remove("selected"));
+     d.classList.add("selected");
+
      const r=canvas.getBoundingClientRect(),sx=e.clientX,sy=e.clientY,start={x:b.x,y:b.y};
      d.onpointermove=ev=>{
        b.x=Math.max(0,Math.min(1-b.w,start.x+(ev.clientX-sx)/r.width));
        b.y=Math.max(0,Math.min(1-b.h,start.y+(ev.clientY-sy)/r.height));
        positionPreset(flat);
      };
-     d.onpointerup=()=>{d.onpointermove=null;syncPreset(flat)};
+     d.onpointerup=()=>{
+       d.onpointermove=null;
+       syncPreset(flat);
+     };
+   };
+
+   // Resize box from bottom-right
+   rh.onpointerdown=e=>{
+     e.preventDefault();
+     e.stopPropagation();
+     rh.setPointerCapture(e.pointerId);
+     [...stage.querySelectorAll(".presetBox")].forEach(x=>x.classList.remove("selected"));
+     d.classList.add("selected");
+
+     const r=canvas.getBoundingClientRect(),sx=e.clientX,sy=e.clientY,start={w:b.w,h:b.h};
+     rh.onpointermove=ev=>{
+       const nw=start.w+(ev.clientX-sx)/r.width;
+       const nh=start.h+(ev.clientY-sy)/r.height;
+       b.w=Math.max(.06,Math.min(.30,Math.min(1-b.x,nw)));
+       b.h=Math.max(.10,Math.min(.45,Math.min(1-b.y,nh)));
+       positionPreset(flat);
+     };
+     rh.onpointerup=()=>{
+       rh.onpointermove=null;
+       syncPreset(flat);
+     };
    };
  });
+
  positionPreset(flat);
 }
 function positionPreset(flat=flatPreset()){
@@ -397,8 +442,9 @@ function classifyFixedDigit(box){
 
 function analyzeFixedGroup(group){
  const rs=DIGIT_BOXES[group].map(classifyFixedDigit);
- const value=rs.every(r=>r.n!==null)?Number(rs.map(r=>r.n).join("")):null;
- return {rs,value};
+ const text=rs.map(r=>r.n===null?"?":String(r.n)).join("");
+ const value=rs.every(r=>r.n!==null)?Number(text):null;
+ return {rs,value,text};
 }
 
 function drawFixedDebug(obj,id){
@@ -419,10 +465,11 @@ $("readBtn").onclick=()=>{
  drawFixedDebug(S,"dbgSys");drawFixedDebug(D,"dbgDia");drawFixedDebug(P,"dbgPulse");
 
  const show=(obj,id,input,min,max)=>{
+  $(id).textContent=obj.text;
   if(obj.value!==null&&obj.value>=min&&obj.value<=max){
-    $(id).textContent=obj.value;$(input).value=obj.value;
+    $(input).value=obj.value;
   }else{
-    $(id).textContent="?";$(input).value="";
+    $(input).value="";
   }
  };
  show(S,"rSys","sys",70,250);
