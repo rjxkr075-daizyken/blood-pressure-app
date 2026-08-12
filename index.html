@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v26</title>
+<title>HEM-7271T 血圧フォト記録 v27</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -48,7 +48,7 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v26</h1>
+<h1>HEM-7271T 血圧フォト記録 v27</h1>
 <div class="sub">濃いLCDセグメント分離 + 形状判定（V23修正版2）</div>
 
 <div class="card">
@@ -75,7 +75,7 @@ svg{width:100%;height:230px;display:block}
  <div id="presetStage">
    <canvas id="presetCanvas" width="900" height="700"></canvas>
  </div>
- <div class="presetHint">V26では通常、7個の青枠を画像から自動検出します。青枠は確認用で、自動検出に失敗した場合だけ手動で修正できます。</div>
+ <div class="presetHint">V27ではV26の7個の青枠自動検出を維持します。認識時だけ各青枠の内側を固定割合で少し縮め、隣接数字やLCD端の混入を減らします。</div>
  <div class="row" style="margin-top:10px">
   <button id="autoBoxesBtn" class="secondary" disabled>桁位置を自動検出</button>
   <button id="readBtn" disabled>HEM-7271T専用解析</button>
@@ -679,27 +679,51 @@ function scoreShapeDigit(f,d){
  return -error;
 }
 
+
+function fixedInnerCropV27(raw){
+ // V27: deterministic inner crop only.
+ // No content-aware trimming, no learned samples.
+ // Keep the digit position fixed and shave only the outer margins that
+ // commonly contain neighboring strokes / LCD frame.
+ const L=0.08, R=0.08, T=0.06, B=0.10;
+ const x1=Math.round(raw.width*L);
+ const x2=Math.round(raw.width*(1-R));
+ const y1=Math.round(raw.height*T);
+ const y2=Math.round(raw.height*(1-B));
+
+ const w=Math.max(1,x2-x1);
+ const h=Math.max(1,y2-y1);
+ const out=document.createElement("canvas");
+ out.width=w; out.height=h;
+ out.getContext("2d").drawImage(raw,x1,y1,w,h,0,0,w,h);
+
+ return {
+   canvas:out,
+   inner:{left:L,right:R,top:T,bottom:B,x1,y1,x2,y2}
+ };
+}
+
 function classifyFixedDigit(box){
  const raw=cropFixedDigit(box);
+ const inner=fixedInnerCropV27(raw);
+ const src=inner.canvas;
 
- // V22: saved crop is authoritative, no learned data.
  const norm=document.createElement("canvas");
  norm.width=100; norm.height=170;
  const nctx=norm.getContext("2d");
- nctx.fillStyle="#fff"; nctx.fillRect(0,0,norm.width,norm.height);
+ nctx.fillStyle="#fff";
+ nctx.fillRect(0,0,norm.width,norm.height);
 
- // tiny safety margin only
- const mx=Math.round(raw.width*.015), my=Math.round(raw.height*.015);
- nctx.drawImage(raw,mx,my,Math.max(1,raw.width-2*mx),Math.max(1,raw.height-2*my),0,0,norm.width,norm.height);
+ // No automatic content-based trim. The fixed V27 inset is the only crop.
+ nctx.drawImage(src,0,0,src.width,src.height,0,0,norm.width,norm.height);
 
  const f=extractShapeFeatures(norm);
  const cand=[];
  for(let d=0;d<=9;d++) cand.push({digit:d,score:scoreShapeDigit(f,d)});
  cand.sort((a,b)=>b.score-a.score);
 
- const best=cand[0], second=cand[1];
+ const best=cand[0],second=cand[1];
  const margin=best.score-second.score;
-
  const confidence=Math.max(0,Math.min(1,margin/0.55));
  const n=(margin>=0.10)?best.digit:null;
 
@@ -710,10 +734,9 @@ function classifyFixedDigit(box){
    margin,
    features:f,
    canvas:norm,
-   refine:{mode:"dark-segment-v23"}
+   refine:{mode:"v27-fixed-inner",...inner.inner}
  };
 }
-
 
 function smooth1dV26(a,r=2){
  const out=new Float32Array(a.length);
@@ -986,7 +1009,8 @@ $("readBtn").onclick=async()=>{
      `${r.n??"?"} conf=${r.confidence.toFixed(2)} margin=${r.margin.toFixed(2)} `+
      `rel=${r.features.rel.map(v=>v.toFixed(2)).join(",")} `+
      `${r.overrideReason ? "override="+r.overrideReason+" base="+(r.baseN??"?")+" " : ""}`+
-     `cuts=gray:${r.features.absCut.toFixed(1)},contrast:${r.features.conCut.toFixed(1)} crop=v26-auto`
+     `inner=L${r.refine.left.toFixed(2)},R${r.refine.right.toFixed(2)},T${r.refine.top.toFixed(2)},B${r.refine.bottom.toFixed(2)} `+
+     `cuts=gray:${r.features.absCut.toFixed(1)},contrast:${r.features.conCut.toFixed(1)} crop=v27-fixed-inner`
    ).join(" / ");
 
    const log=fmt("SYS",S)+"\n"+fmt("DIA",D)+"\n"+fmt("PULSE",P);
@@ -1001,7 +1025,7 @@ $("readBtn").onclick=async()=>{
    if(S.value!==null&&D.value!==null&&P.value!==null&&S.value>D.value){
      $("status").textContent=`HEM-7271T専用判定：${S.value}/${D.value}、脈拍 ${P.value}。写真と照合してください。`;
    }else{
-     $("status").textContent="解析は完了しました。一部の桁が不確かです。下のログを確認してください。";
+     $("status").textContent="解析は完了しました。一部の桁が不確かです。V27固定インナー領域のログを確認してください。";
    }
  }catch(err){
    const msg=errorText(err);
