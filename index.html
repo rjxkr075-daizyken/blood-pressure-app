@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v15</title>
+<title>HEM-7271T 血圧フォト記録 v16</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -36,13 +36,18 @@ label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
 .stat{padding:11px;background:#f9fafb;border:1px solid var(--line);border-radius:13px}.stat b{font-size:19px;display:block}.stat span{font-size:11px;color:var(--muted)}
 table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1px solid var(--line);font-size:13px;text-align:left}th{color:var(--muted)}
 svg{width:100%;height:230px;display:block}
+#presetStage{position:relative;margin-top:12px;touch-action:none;user-select:none}
+#presetCanvas{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:14px;background:#eee}
+.presetBox{position:absolute;border:2px solid #2563eb;background:#2563eb18;border-radius:8px;touch-action:none}
+.presetBox span{position:absolute;left:2px;top:2px;background:#2563eb;color:#fff;border-radius:5px;padding:2px 5px;font-size:10px;font-weight:700}
+.presetBox.selected{border-color:#dc2626;background:#dc262618}
 @media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v15</h1>
-<div class="sub">HEM-7271T専用固定レイアウト + 各桁内だけ微調整</div>
+<h1>HEM-7271T 血圧フォト記録 v16</h1>
+<div class="sub">HEM-7271T専用プリセット校正 + 保存</div>
 
 <div class="card">
  <div class="row">
@@ -59,12 +64,17 @@ svg{width:100%;height:230px;display:block}
   <div class="handle" data-i="0"></div><div class="handle" data-i="1"></div>
   <div class="handle" data-i="2"></div><div class="handle" data-i="3"></div>
  </div>
- <div class="notice">4つの丸をLCD面の四隅へ合わせてください。V15ではLCD四隅だけ合わせれば、各桁位置はHEM-7271T専用座標を使います。</div>
+ <div class="notice">4つの丸をLCD面の四隅へ合わせてください。V16ではLCD四隅補正後、7個の桁枠を一度だけ校正して保存できます。</div>
 </div>
 
 <div class="card">
- <div class="row">
+ <strong>HEM-7271T 桁位置プリセット</strong>
+ <div class="sub">最初の1回だけ、7個の青枠を実際の数字に合わせて保存します。次回以降は自動で呼び出します。</div>
+ <div id="presetStage" style="display:none"><canvas id="presetCanvas" width="900" height="700"></canvas></div>
+ <div class="row" style="margin-top:10px">
   <button id="readBtn" disabled>HEM-7271T専用解析</button>
+  <button id="savePresetBtn" class="secondary" disabled>桁位置を保存</button>
+  <button id="resetPresetBtn" class="secondary" disabled>初期位置へ戻す</button>
  </div>
  <canvas id="rectified" width="900" height="700" style="display:none;margin-top:12px"></canvas>
  <div id="status" class="status" style="padding-top:10px">写真を選択してください。</div>
@@ -122,21 +132,85 @@ const PAT={
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
 };
 
-// HEM-7271T専用の固定桁位置（LCD補正後の900x700座標比）
-const DIGIT_BOXES={
+const PRESET_KEY="bp_hem7271t_digit_preset_v16";
+const DEFAULT_DIGIT_BOXES={
  sys:[
-  {x:.19,y:.19,w:.12,h:.30},
-  {x:.32,y:.19,w:.17,h:.30},
-  {x:.53,y:.19,w:.10,h:.30}
+  {id:"s1",label:"SYS1",x:.17,y:.18,w:.12,h:.31},
+  {id:"s2",label:"SYS2",x:.30,y:.18,w:.18,h:.31},
+  {id:"s3",label:"SYS3",x:.52,y:.18,w:.11,h:.31}
  ],
  dia:[
-  {x:.34,y:.43,w:.14,h:.27},
-  {x:.53,y:.43,w:.10,h:.27}
+  {id:"d1",label:"DIA1",x:.32,y:.43,w:.16,h:.28},
+  {id:"d2",label:"DIA2",x:.52,y:.43,w:.11,h:.28}
  ],
  pulse:[
-  {x:.42,y:.69,w:.12,h:.18},
-  {x:.55,y:.69,w:.12,h:.18}
+  {id:"p1",label:"P1",x:.39,y:.70,w:.13,h:.19},
+  {id:"p2",label:"P2",x:.53,y:.70,w:.13,h:.19}
  ]
+};
+let DIGIT_BOXES=structuredClone(DEFAULT_DIGIT_BOXES);
+
+
+function loadPreset(){
+ try{
+   DIGIT_BOXES=JSON.parse(localStorage.getItem(PRESET_KEY)||"null")||structuredClone(DEFAULT_DIGIT_BOXES);
+ }catch{DIGIT_BOXES=structuredClone(DEFAULT_DIGIT_BOXES)}
+}
+function flatPreset(){
+ return [
+  ...DIGIT_BOXES.sys.map(b=>({...b,group:"sys"})),
+  ...DIGIT_BOXES.dia.map(b=>({...b,group:"dia"})),
+  ...DIGIT_BOXES.pulse.map(b=>({...b,group:"pulse"}))
+ ];
+}
+function syncPreset(flat){
+ DIGIT_BOXES={
+  sys:flat.filter(b=>b.group==="sys").map(({group,...r})=>r),
+  dia:flat.filter(b=>b.group==="dia").map(({group,...r})=>r),
+  pulse:flat.filter(b=>b.group==="pulse").map(({group,...r})=>r)
+ };
+}
+function buildPresetOverlay(){
+ const stage=$("presetStage"),canvas=$("presetCanvas"),ctx=canvas.getContext("2d");
+ ctx.clearRect(0,0,canvas.width,canvas.height);
+ ctx.drawImage(rc,0,0,canvas.width,canvas.height);
+ stage.style.display="block";
+ [...stage.querySelectorAll(".presetBox")].forEach(x=>x.remove());
+ const flat=flatPreset();
+ flat.forEach((b,i)=>{
+   const d=document.createElement("div"); d.className="presetBox"; d.dataset.i=i;
+   const s=document.createElement("span"); s.textContent=b.label; d.appendChild(s); stage.appendChild(d);
+   d.onpointerdown=e=>{
+     e.preventDefault(); d.setPointerCapture(e.pointerId);
+     [...stage.querySelectorAll(".presetBox")].forEach(x=>x.classList.remove("selected")); d.classList.add("selected");
+     const r=canvas.getBoundingClientRect(),sx=e.clientX,sy=e.clientY,start={x:b.x,y:b.y};
+     d.onpointermove=ev=>{
+       b.x=Math.max(0,Math.min(1-b.w,start.x+(ev.clientX-sx)/r.width));
+       b.y=Math.max(0,Math.min(1-b.h,start.y+(ev.clientY-sy)/r.height));
+       positionPreset(flat);
+     };
+     d.onpointerup=()=>{d.onpointermove=null;syncPreset(flat)};
+   };
+ });
+ positionPreset(flat);
+}
+function positionPreset(flat=flatPreset()){
+ const r=$("presetCanvas").getBoundingClientRect();
+ [...$("presetStage").querySelectorAll(".presetBox")].forEach(d=>{
+  const b=flat[Number(d.dataset.i)];
+  d.style.left=(b.x*r.width)+"px"; d.style.top=(b.y*r.height)+"px";
+  d.style.width=(b.w*r.width)+"px"; d.style.height=(b.h*r.height)+"px";
+ });
+}
+window.addEventListener("resize",()=>positionPreset());
+$("savePresetBtn").onclick=()=>{
+ localStorage.setItem(PRESET_KEY,JSON.stringify(DIGIT_BOXES));
+ $("status").textContent="桁位置プリセットを保存しました。次回から自動で使います。";
+};
+$("resetPresetBtn").onclick=()=>{
+ DIGIT_BOXES=structuredClone(DEFAULT_DIGIT_BOXES);
+ buildPresetOverlay();
+ $("status").textContent="桁位置を初期値へ戻しました。";
 };
 
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
@@ -191,8 +265,10 @@ function rectify(){
    dst.data[di]=srcData.data[si];dst.data[di+1]=srcData.data[si+1];dst.data[di+2]=srcData.data[si+2];dst.data[di+3]=255;
   }
  }
- rctx.putImageData(dst,0,0);rc.style.display="block";$("readBtn").disabled=false;
- $("status").textContent="液晶を補正しました。「HEM-7271T専用解析」を押してください。";
+ rctx.putImageData(dst,0,0);rc.style.display="block";
+ loadPreset(); buildPresetOverlay();
+ ["readBtn","savePresetBtn","resetPresetBtn"].forEach(id=>$(id).disabled=false);
+ $("status").textContent="青枠が各数字に合っているか確認し、必要なら一度だけ調整して保存してください。";
 }
 $("rectifyBtn").onclick=rectify;
 
@@ -387,6 +463,7 @@ function draw(r){
 }
 $("clearBtn").onclick=()=>{if(confirm("全記録を削除しますか？")){localStorage.removeItem(KEY);render()}};
 $("csvBtn").onclick=()=>{const r=load(),rows=[["date","systolic","diastolic","pulse","memo"],...r.map(x=>[x.date,x.sys,x.dia,x.pulse??"",x.memo||""])],csv=rows.map(row=>row.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv"}));a.download="blood_pressure.csv";a.click()};
+loadPreset();
 render();
 if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
 </script>
