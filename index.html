@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v5</title>
+<title>HEM-7271T 血圧フォト記録 v6</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -27,6 +27,7 @@ label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
 .digitbox{position:absolute;border:2px solid #2563eb;background:#2563eb18;border-radius:8px;touch-action:none}
 .digitbox span{position:absolute;left:2px;top:2px;background:#2563eb;color:#fff;border-radius:5px;padding:2px 5px;font-size:10px;font-weight:700}
 .digitbox.selected{border-color:#dc2626;background:#dc262618}
+.resizegrip{position:absolute!important;right:-9px!important;bottom:-9px!important;left:auto!important;top:auto!important;width:22px;height:22px;padding:0!important;border-radius:50%!important;background:#dc2626!important;border:3px solid #fff;box-shadow:0 1px 5px #0005;touch-action:none}
 .notice{padding:10px 12px;border-radius:12px;background:#fff7ed;font-size:13px;line-height:1.5;margin-top:10px}
 .results{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
 .result{background:#f9fafb;border:1px solid var(--line);border-radius:13px;padding:10px;text-align:center}
@@ -41,8 +42,8 @@ table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1p
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v5</h1>
-<div class="sub">4点補正 + 数字枠の手動微調整 + 校正保存</div>
+<h1>HEM-7271T 血圧フォト記録 v6</h1>
+<div class="sub">4点補正 + 数字枠の移動・拡大縮小 + 校正保存</div>
 
 <div class="card">
  <div class="row">
@@ -64,7 +65,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1p
 
 <div class="card">
  <strong>数字枠の位置合わせ</strong>
- <div class="sub">青い枠を各数字の上に重ねます。枠をドラッグして移動できます。赤枠が選択中です。</div>
+ <div class="sub">青い枠を各数字全体より少し大きめに重ねます。枠の中央をドラッグすると移動、右下の丸をドラッグすると拡大・縮小できます。</div>
  <div id="rectStage" style="display:none">
    <canvas id="rectified" width="900" height="700"></canvas>
  </div>
@@ -108,7 +109,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1p
 
 <script>
 const $=id=>document.getElementById(id);
-const KEY="bp_hem7271t_v5", CALKEY="bp_hem7271t_digitboxes_v5";
+const KEY="bp_hem7271t_v6", CALKEY="bp_hem7271t_digitboxes_v6";
 $("date").value=new Date().toISOString().slice(0,10);
 
 let src=null, pts=[], boxes=[];
@@ -117,13 +118,13 @@ const handles=[...document.querySelectorAll(".handle")];
 const rc=$("rectified"),rctx=rc.getContext("2d",{willReadFrequently:true}),rectStage=$("rectStage");
 
 const DEFAULT_BOXES=[
- {id:"s1",label:"SYS1",group:"sys",x:.27,y:.12,w:.14,h:.28},
- {id:"s2",label:"SYS2",group:"sys",x:.41,y:.12,w:.14,h:.28},
- {id:"s3",label:"SYS3",group:"sys",x:.55,y:.12,w:.14,h:.28},
- {id:"d1",label:"DIA1",group:"dia",x:.39,y:.40,w:.14,h:.27},
- {id:"d2",label:"DIA2",group:"dia",x:.53,y:.40,w:.14,h:.27},
- {id:"p1",label:"P1",group:"pulse",x:.50,y:.69,w:.11,h:.18},
- {id:"p2",label:"P2",group:"pulse",x:.61,y:.69,w:.11,h:.18}
+ {id:"s1",label:"SYS1",group:"sys",x:.25,y:.09,w:.18,h:.34},
+ {id:"s2",label:"SYS2",group:"sys",x:.39,y:.09,w:.18,h:.34},
+ {id:"s3",label:"SYS3",group:"sys",x:.53,y:.09,w:.18,h:.34},
+ {id:"d1",label:"DIA1",group:"dia",x:.37,y:.37,w:.18,h:.33},
+ {id:"d2",label:"DIA2",group:"dia",x:.51,y:.37,w:.18,h:.33},
+ {id:"p1",label:"P1",group:"pulse",x:.48,y:.66,w:.15,h:.24},
+ {id:"p2",label:"P2",group:"pulse",x:.59,y:.66,w:.15,h:.24}
 ];
 
 const MAP={"1111110":0,"0110000":1,"1101101":2,"1111001":3,"0110011":4,"1011011":5,"1011111":6,"1110000":7,"1111111":8,"1111011":9};
@@ -193,8 +194,13 @@ function makeBoxes(){
  [...rectStage.querySelectorAll(".digitbox")].forEach(x=>x.remove());
  boxes.forEach((b,i)=>{
    const d=document.createElement("div");d.className="digitbox";d.dataset.i=i;
-   const s=document.createElement("span");s.textContent=b.label;d.appendChild(s);rectStage.appendChild(d);
+   const s=document.createElement("span");s.textContent=b.label;d.appendChild(s);
+   const grip=document.createElement("i");grip.className="resizegrip";grip.title="大きさ変更";d.appendChild(grip);
+   rectStage.appendChild(d);
+
+   // Move the whole digit box.
    d.onpointerdown=e=>{
+     if(e.target===grip)return;
      e.preventDefault();d.setPointerCapture(e.pointerId);
      [...rectStage.querySelectorAll(".digitbox")].forEach(x=>x.classList.remove("selected"));
      d.classList.add("selected");
@@ -206,6 +212,21 @@ function makeBoxes(){
        positionBoxes();
      };
      d.onpointerup=()=>d.onpointermove=null;
+   };
+
+   // Resize from bottom-right corner.
+   grip.onpointerdown=e=>{
+     e.preventDefault();e.stopPropagation();grip.setPointerCapture(e.pointerId);
+     [...rectStage.querySelectorAll(".digitbox")].forEach(x=>x.classList.remove("selected"));
+     d.classList.add("selected");
+     const startX=e.clientX,startY=e.clientY,start={w:b.w,h:b.h};
+     grip.onpointermove=ev=>{
+       const r=rc.getBoundingClientRect();
+       b.w=Math.max(.07,Math.min(1-b.x,start.w+(ev.clientX-startX)/r.width));
+       b.h=Math.max(.12,Math.min(1-b.y,start.h+(ev.clientY-startY)/r.height));
+       positionBoxes();
+     };
+     grip.onpointerup=()=>grip.onpointermove=null;
    };
  });
 }
