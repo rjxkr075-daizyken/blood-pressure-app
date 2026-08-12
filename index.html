@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v13</title>
+<title>HEM-7271T 血圧フォト記録 v14</title>
 <style>
-:root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c;--blue:#2563eb}
+:root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .wrap{max-width:800px;margin:auto;padding:18px 14px 44px}
@@ -20,41 +20,36 @@ input[type=number],input[type=date],input[type=text]{width:100%;padding:11px;bor
 .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}.grow{flex:1}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
-#stage,#rectStage{position:relative;margin-top:12px;touch-action:none;user-select:none}
+#stage{position:relative;margin-top:12px;touch-action:none;user-select:none}
 #photoCanvas,#rectified{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:14px;background:#eee}
 .handle{position:absolute;width:28px;height:28px;border-radius:50%;background:#111827;border:4px solid #fff;box-shadow:0 1px 6px #0005;transform:translate(-50%,-50%);touch-action:none}
 .guide{position:absolute;border:2px dashed #111827;pointer-events:none}
-.digitbox{position:absolute;border:2px solid var(--blue);background:#2563eb18;border-radius:8px;touch-action:none}
-.digitbox span{position:absolute;left:2px;top:2px;background:var(--blue);color:#fff;border-radius:5px;padding:2px 5px;font-size:10px;font-weight:700}
 .notice{padding:10px 12px;border-radius:12px;background:#fff7ed;font-size:13px;line-height:1.5;margin-top:10px}
 .results{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
 .result{background:#f9fafb;border:1px solid var(--line);border-radius:13px;padding:10px;text-align:center}
 .result b{display:block;font-size:22px}.result span{font-size:11px;color:var(--muted)}
+.rowdebug{display:grid;grid-template-columns:1fr;gap:10px;margin-top:10px}
+.rowbox{border:1px solid var(--line);border-radius:12px;padding:8px;background:#fafafa}
+.rowbox canvas{width:100%;height:150px;object-fit:contain;background:#fff;border-radius:8px}
+.debug{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:pre-wrap;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:10px}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .stat{padding:11px;background:#f9fafb;border:1px solid var(--line);border-radius:13px}.stat b{font-size:19px;display:block}.stat span{font-size:11px;color:var(--muted)}
 table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1px solid var(--line);font-size:13px;text-align:left}th{color:var(--muted)}
 svg{width:100%;height:230px;display:block}
-.debug{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:pre-wrap;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:10px}
-.debuggrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
-.debugbox{border:1px solid var(--line);border-radius:12px;padding:8px;background:#fafafa}
-.debugbox canvas{width:100%;height:140px;object-fit:contain;background:#fff;border-radius:8px}
-.debugbox b{display:block;font-size:12px;margin-bottom:5px}
-@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}.debuggrid{grid-template-columns:1fr}}
+@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v13</h1>
-<div class="sub">数字本体を自動切り詰め + 比率正規化 + 背景差分</div>
+<h1>HEM-7271T 血圧フォト記録 v14</h1>
+<div class="sub">LCD四隅だけ指定 → 3行抽出 → 桁境界を自動検出</div>
 
 <div class="card">
  <div class="row">
   <label class="filebtn" for="cameraPhoto">📷 今撮影する</label>
   <input id="cameraPhoto" type="file" accept="image/*" capture="environment">
-
   <label class="filebtn secondary" for="libraryPhoto">🖼 写真から選ぶ</label>
   <input id="libraryPhoto" type="file" accept="image/*">
-
   <button id="rectifyBtn" class="secondary" disabled>液晶を補正</button>
  </div>
 
@@ -64,18 +59,14 @@ svg{width:100%;height:230px;display:block}
   <div class="handle" data-i="0"></div><div class="handle" data-i="1"></div>
   <div class="handle" data-i="2"></div><div class="handle" data-i="3"></div>
  </div>
- <div class="notice">4つの丸をLCD面の四隅へ合わせてから「液晶を補正」を押してください。</div>
+ <div class="notice">4つの丸をLCD面の四隅へ合わせてください。V14では数字ごとの青枠調整は不要です。</div>
 </div>
 
 <div class="card">
- <strong>数字枠の位置合わせ</strong>
- <div class="sub">青い枠を各数字に重ねます。保存済み位置は自動で呼び出します。</div>
- <div id="rectStage" style="display:none"><canvas id="rectified" width="900" height="700"></canvas></div>
- <div class="row" style="margin-top:10px">
-  <button id="readBtn" disabled>読み取る</button>
-  <button id="saveCalibBtn" class="secondary" disabled>枠位置を保存</button>
-  <button id="resetBoxesBtn" class="secondary" disabled>枠を初期位置へ</button>
+ <div class="row">
+  <button id="readBtn" disabled>3行を自動解析</button>
  </div>
+ <canvas id="rectified" width="900" height="700" style="display:none;margin-top:12px"></canvas>
  <div id="status" class="status" style="padding-top:10px">写真を選択してください。</div>
 
  <div id="results" class="results" style="display:none">
@@ -84,10 +75,10 @@ svg{width:100%;height:230px;display:block}
   <div class="result"><span>脈拍</span><b id="rPulse">—</b></div>
  </div>
 
- <div id="debuggrid" class="debuggrid" style="display:none">
-  <div class="debugbox"><b>SYS 差分</b><canvas id="dbgSys"></canvas></div>
-  <div class="debugbox"><b>DIA 差分</b><canvas id="dbgDia"></canvas></div>
-  <div class="debugbox"><b>PULSE 差分</b><canvas id="dbgPulse"></canvas></div>
+ <div id="rowdebug" class="rowdebug" style="display:none">
+  <div class="rowbox"><b>SYS 行</b><canvas id="dbgSys"></canvas></div>
+  <div class="rowbox"><b>DIA 行</b><canvas id="dbgDia"></canvas></div>
+  <div class="rowbox"><b>PULSE 行</b><canvas id="dbgPulse"></canvas></div>
  </div>
  <div id="debug" class="debug" style="display:none"></div>
 </div>
@@ -117,28 +108,25 @@ svg{width:100%;height:230px;display:block}
 
 <script>
 const $=id=>document.getElementById(id);
-const KEY="bp_hem7271t_v12", CALKEY="bp_hem7271t_digitboxes_v12";
+const KEY="bp_hem7271t_v14";
 $("date").value=new Date().toISOString().slice(0,10);
 
-let src=null,pts=[],boxes=[];
-const pc=$("photoCanvas"),pctx=pc.getContext("2d",{willReadFrequently:true}),stage=$("stage");
-const rc=$("rectified"),rctx=rc.getContext("2d",{willReadFrequently:true}),rectStage=$("rectStage");
+let src=null,pts=[];
+const pc=$("photoCanvas"),pctx=pc.getContext("2d",{willReadFrequently:true});
+const rc=$("rectified"),rctx=rc.getContext("2d",{willReadFrequently:true});
 const handles=[...document.querySelectorAll(".handle")];
-
-const DEFAULT_BOXES=[
- {id:"s1",label:"SYS1",group:"sys",x:.27,y:.12,w:.14,h:.28},
- {id:"s2",label:"SYS2",group:"sys",x:.41,y:.12,w:.14,h:.28},
- {id:"s3",label:"SYS3",group:"sys",x:.55,y:.12,w:.14,h:.28},
- {id:"d1",label:"DIA1",group:"dia",x:.39,y:.40,w:.14,h:.27},
- {id:"d2",label:"DIA2",group:"dia",x:.53,y:.40,w:.14,h:.27},
- {id:"p1",label:"P1",group:"pulse",x:.50,y:.69,w:.11,h:.18},
- {id:"p2",label:"P2",group:"pulse",x:.61,y:.69,w:.11,h:.18}
-];
 
 const PAT={
  0:[1,1,1,1,1,1,0],1:[0,1,1,0,0,0,0],2:[1,1,0,1,1,0,1],3:[1,1,1,1,0,0,1],
  4:[0,1,1,0,0,1,1],5:[1,0,1,1,0,1,1],6:[1,0,1,1,1,1,1],7:[1,1,1,0,0,0,0],
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
+};
+
+// Normalized LCD row regions, deliberately broad.
+const ROWS={
+ sys:{x:.12,y:.16,w:.62,h:.29,digits:3},
+ dia:{x:.20,y:.43,w:.52,h:.27,digits:2},
+ pulse:{x:.37,y:.70,w:.36,h:.19,digits:2}
 };
 
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
@@ -148,23 +136,14 @@ async function handlePhotoFile(f){
  src=await loadImage(f);
  const maxW=1000,scale=Math.min(1,maxW/src.naturalWidth);
  pc.width=Math.round(src.naturalWidth*scale);pc.height=Math.round(src.naturalHeight*scale);
- pctx.clearRect(0,0,pc.width,pc.height);
- pctx.drawImage(src,0,0,pc.width,pc.height);
- stage.style.display="block";
+ pctx.clearRect(0,0,pc.width,pc.height);pctx.drawImage(src,0,0,pc.width,pc.height);
+ $("stage").style.display="block";
  pts=[{x:pc.width*.29,y:pc.height*.20},{x:pc.width*.79,y:pc.height*.20},{x:pc.width*.79,y:pc.height*.66},{x:pc.width*.29,y:pc.height*.66}];
  positionHandles();$("rectifyBtn").disabled=false;
- $("status").textContent="写真を読み込みました。4つの丸をLCD面の四隅に合わせてください。";
+ $("status").textContent="4つの丸をLCD面の四隅に合わせてください。";
 }
-
-$("cameraPhoto").onchange=async e=>{
- const f=e.target.files?.[0]; await handlePhotoFile(f);
- e.target.value="";
-};
-
-$("libraryPhoto").onchange=async e=>{
- const f=e.target.files?.[0]; await handlePhotoFile(f);
- e.target.value="";
-};
+$("cameraPhoto").onchange=async e=>{await handlePhotoFile(e.target.files?.[0]);e.target.value=""};
+$("libraryPhoto").onchange=async e=>{await handlePhotoFile(e.target.files?.[0]);e.target.value=""};
 
 function positionHandles(){
  const r=pc.getBoundingClientRect(),sx=r.width/pc.width,sy=r.height/pc.height;
@@ -173,7 +152,7 @@ function positionHandles(){
  g.style.left=Math.min(...xs)+"px";g.style.top=Math.min(...ys)+"px";
  g.style.width=(Math.max(...xs)-Math.min(...xs))+"px";g.style.height=(Math.max(...ys)-Math.min(...ys))+"px";
 }
-window.addEventListener("resize",()=>{positionHandles();positionBoxes()});
+window.addEventListener("resize",positionHandles);
 handles.forEach(h=>{
  const i=Number(h.dataset.i);
  h.onpointerdown=e=>{
@@ -202,51 +181,19 @@ function rectify(){
    dst.data[di]=srcData.data[si];dst.data[di+1]=srcData.data[si+1];dst.data[di+2]=srcData.data[si+2];dst.data[di+3]=255;
   }
  }
- rctx.putImageData(dst,0,0);rectStage.style.display="block";
- try{boxes=JSON.parse(localStorage.getItem(CALKEY)||"null")||structuredClone(DEFAULT_BOXES)}catch{boxes=structuredClone(DEFAULT_BOXES)}
- makeBoxes();positionBoxes();
- ["readBtn","saveCalibBtn","resetBoxesBtn"].forEach(id=>$(id).disabled=false);
- $("status").textContent="青い枠を各数字に合わせてください。";
+ rctx.putImageData(dst,0,0);rc.style.display="block";$("readBtn").disabled=false;
+ $("status").textContent="液晶を補正しました。「3行を自動解析」を押してください。";
 }
 $("rectifyBtn").onclick=rectify;
 
-function makeBoxes(){
- [...rectStage.querySelectorAll(".digitbox")].forEach(x=>x.remove());
- boxes.forEach((b,i)=>{
-  const d=document.createElement("div");d.className="digitbox";d.dataset.i=i;
-  const s=document.createElement("span");s.textContent=b.label;d.appendChild(s);rectStage.appendChild(d);
-  d.onpointerdown=e=>{
-   e.preventDefault();d.setPointerCapture(e.pointerId);
-   const sx=e.clientX,sy=e.clientY,start={x:b.x,y:b.y},r=rc.getBoundingClientRect();
-   d.onpointermove=ev=>{
-    b.x=Math.max(0,Math.min(1-b.w,start.x+(ev.clientX-sx)/r.width));
-    b.y=Math.max(0,Math.min(1-b.h,start.y+(ev.clientY-sy)/r.height));
-    positionBoxes();
-   };
-   d.onpointerup=()=>d.onpointermove=null;
-  };
- });
-}
-function positionBoxes(){
- const r=rc.getBoundingClientRect();
- [...rectStage.querySelectorAll(".digitbox")].forEach(d=>{
-  const b=boxes[Number(d.dataset.i)];
-  d.style.left=(b.x*r.width)+"px";d.style.top=(b.y*r.height)+"px";
-  d.style.width=(b.w*r.width)+"px";d.style.height=(b.h*r.height)+"px";
- });
-}
-$("saveCalibBtn").onclick=()=>{localStorage.setItem(CALKEY,JSON.stringify(boxes));$("status").textContent="数字枠の位置を保存しました。"};
-$("resetBoxesBtn").onclick=()=>{boxes=structuredClone(DEFAULT_BOXES);makeBoxes();positionBoxes();$("status").textContent="数字枠を初期位置へ戻しました。"};
-
-function cropDigit(b){
- const x=Math.max(0,Math.round(b.x*rc.width)),y=Math.max(0,Math.round(b.y*rc.height));
- const w=Math.max(20,Math.round(b.w*rc.width)),h=Math.max(20,Math.round(b.h*rc.height));
- const c=document.createElement("canvas");c.width=90;c.height=150;
- c.getContext("2d").drawImage(rc,x,y,w,h,0,0,c.width,c.height);
+function cropRow(def){
+ const c=document.createElement("canvas");
+ c.width=Math.round(rc.width*def.w);c.height=Math.round(rc.height*def.h);
+ c.getContext("2d").drawImage(rc,rc.width*def.x,rc.height*def.y,rc.width*def.w,rc.height*def.h,0,0,c.width,c.height);
  return c;
 }
 
-function grayscale(c){
+function grayData(c){
  const ctx=c.getContext("2d",{willReadFrequently:true}),im=ctx.getImageData(0,0,c.width,c.height),d=im.data;
  const g=new Float32Array(c.width*c.height);
  for(let i=0,j=0;i<d.length;i+=4,j++)g[j]=.299*d[i]+.587*d[i+1]+.114*d[i+2];
@@ -254,223 +201,146 @@ function grayscale(c){
 }
 
 function boxBlur(src,w,h,r){
- const out=new Float32Array(src.length);
- const tmp=new Float32Array(src.length);
+ const out=new Float32Array(src.length),tmp=new Float32Array(src.length);
  for(let y=0;y<h;y++){
   let sum=0;
-  for(let x=-r;x<=r;x++){let xx=Math.max(0,Math.min(w-1,x));sum+=src[y*w+xx]}
+  for(let x=-r;x<=r;x++)sum+=src[y*w+Math.max(0,Math.min(w-1,x))];
   for(let x=0;x<w;x++){
    tmp[y*w+x]=sum/(2*r+1);
-   let oldx=Math.max(0,x-r),newx=Math.min(w-1,x+r+1);
-   sum+=src[y*w+newx]-src[y*w+oldx];
+   sum+=src[y*w+Math.min(w-1,x+r+1)]-src[y*w+Math.max(0,x-r)];
   }
  }
  for(let x=0;x<w;x++){
   let sum=0;
-  for(let y=-r;y<=r;y++){let yy=Math.max(0,Math.min(h-1,y));sum+=tmp[yy*w+x]}
+  for(let y=-r;y<=r;y++)sum+=tmp[Math.max(0,Math.min(h-1,y))*w+x];
   for(let y=0;y<h;y++){
    out[y*w+x]=sum/(2*r+1);
-   let oldy=Math.max(0,y-r),newy=Math.min(h-1,y+r+1);
-   sum+=tmp[newy*w+x]-tmp[oldy*w+x];
+   sum+=tmp[Math.min(h-1,y+r+1)*w+x]-tmp[Math.max(0,y-r)*w+x];
   }
  }
  return out;
 }
 
-function differenceImage(c){
- const {g,w,h}=grayscale(c);
- const bg=boxBlur(g,w,h,5);
- const diff=new Float32Array(g.length);
- for(let i=0;i<g.length;i++)diff[i]=Math.max(0,bg[i]-g[i]); // dark object remains positive
+function diffFor(c){
+ const {g,w,h}=grayData(c),bg=boxBlur(g,w,h,5),diff=new Float32Array(g.length);
+ for(let i=0;i<g.length;i++)diff[i]=Math.max(0,bg[i]-g[i]);
  return {diff,w,h};
 }
 
-function meanRegion(diff,w,h,rect){
- const [x1,y1,x2,y2]=rect;
- let s=0,n=0;
- for(let y=Math.floor(y1*h);y<Math.ceil(y2*h);y++){
-  if(y<0||y>=h)continue;
-  for(let x=Math.floor(x1*w);x<Math.ceil(x2*w);x++){
-   if(x<0||x>=w)continue;
-   s+=diff[y*w+x];n++;
-  }
+function splitDigits(rowCanvas,count){
+ const {diff,w,h}=diffFor(rowCanvas);
+ const col=new Float32Array(w);
+ for(let x=0;x<w;x++){
+  let s=0;
+  for(let y=0;y<h;y++)s+=diff[y*w+x];
+  col[x]=s/h;
  }
+ // smooth projection
+ const sm=new Float32Array(w);
+ for(let x=0;x<w;x++){
+  let s=0,n=0;
+  for(let k=-4;k<=4;k++){let j=x+k;if(j>=0&&j<w){s+=col[j];n++}}
+  sm[x]=s/n;
+ }
+ // find low-energy gaps away from edges
+ let gaps=[];
+ for(let x=Math.floor(w*.08);x<Math.floor(w*.92);x++){
+  if(sm[x]<=sm[x-1]&&sm[x]<=sm[x+1])gaps.push({x,v:sm[x]});
+ }
+ gaps.sort((a,b)=>a.v-b.v);
+
+ const need=count-1, chosen=[];
+ for(const g of gaps){
+  if(chosen.every(x=>Math.abs(x-g.x)>w*.12)){chosen.push(g.x);if(chosen.length===need)break}
+ }
+ if(chosen.length<need){
+  chosen=[];
+  for(let i=1;i<count;i++)chosen.push(Math.round(w*i/count));
+ }
+ chosen.sort((a,b)=>a-b);
+
+ const cuts=[0,...chosen,w],digits=[];
+ for(let i=0;i<count;i++){
+  let x1=cuts[i],x2=cuts[i+1];
+  const pad=Math.round((x2-x1)*.06);
+  x1=Math.max(0,x1+pad);x2=Math.min(w,x2-pad);
+  const c=document.createElement("canvas");c.width=Math.max(10,x2-x1);c.height=h;
+  c.getContext("2d").drawImage(rowCanvas,x1,0,x2-x1,h,0,0,c.width,h);
+  digits.push(c);
+ }
+ return {digits,cuts,projection:sm};
+}
+
+function meanRegion(diff,w,h,rect){
+ const [x1,y1,x2,y2]=rect;let s=0,n=0;
+ for(let y=Math.floor(y1*h);y<Math.ceil(y2*h);y++)for(let x=Math.floor(x1*w);x<Math.ceil(x2*w);x++){s+=diff[y*w+x];n++}
  return n?s/n:0;
 }
-
 const ZONES=[
- [.20,.03,.80,.18], // a
- [.67,.10,.96,.47], // b
- [.67,.53,.96,.90], // c
- [.20,.82,.80,.98], // d
- [.04,.53,.33,.90], // e
- [.04,.10,.33,.47], // f
- [.20,.42,.80,.60]  // g
+ [.20,.03,.80,.18],[.67,.10,.96,.47],[.67,.53,.96,.90],
+ [.20,.82,.80,.98],[.04,.53,.33,.90],[.04,.10,.33,.47],[.20,.42,.80,.60]
 ];
 
-
-function occupancyBounds(diff,w,h){
-  // Stronger pixels are likely to be LCD segments. Use adaptive threshold and
-  // row/column occupancy to locate the actual digit body inside a loose blue box.
-  let vals=Array.from(diff).sort((a,b)=>a-b);
-  const q=p=>vals[Math.min(vals.length-1,Math.floor(vals.length*p))];
-  const th=Math.max(1.2, q(.72));
-  const cols=new Float32Array(w), rows=new Float32Array(h);
-
-  for(let y=0;y<h;y++){
-    for(let x=0;x<w;x++){
-      const v=diff[y*w+x];
-      if(v>=th){ cols[x]+=1; rows[y]+=1; }
-    }
-  }
-
-  // Smooth occupancy to avoid tiny dust/scratch pixels defining the boundary.
-  const smooth=(arr,r)=>{
-    const out=new Float32Array(arr.length);
-    for(let i=0;i<arr.length;i++){
-      let s=0,n=0;
-      for(let k=-r;k<=r;k++){
-        const j=i+k;
-        if(j>=0&&j<arr.length){s+=arr[j];n++}
-      }
-      out[i]=s/n;
-    }
-    return out;
-  };
-  const sc=smooth(cols,2), sr=smooth(rows,2);
-
-  const colCut=Math.max(1,h*.035);
-  const rowCut=Math.max(1,w*.025);
-  let xs=[],ys=[];
-  sc.forEach((v,i)=>{if(v>=colCut)xs.push(i)});
-  sr.forEach((v,i)=>{if(v>=rowCut)ys.push(i)});
-
-  if(!xs.length||!ys.length) return {x1:0,y1:0,x2:w-1,y2:h-1,ok:false};
-
-  let x1=Math.min(...xs),x2=Math.max(...xs),y1=Math.min(...ys),y2=Math.max(...ys);
-
-  // Add margins because 7-seg end caps can be thin.
-  const mx=Math.max(2,Math.round((x2-x1+1)*.08));
-  const my=Math.max(2,Math.round((y2-y1+1)*.06));
-  x1=Math.max(0,x1-mx); x2=Math.min(w-1,x2+mx);
-  y1=Math.max(0,y1-my); y2=Math.min(h-1,y2+my);
-
-  // Reject absurd crops.
-  const bw=x2-x1+1,bh=y2-y1+1;
-  if(bw<w*.18 || bh<h*.28) return {x1:0,y1:0,x2:w-1,y2:h-1,ok:false};
-  return {x1,y1,x2,y2,ok:true};
+function normalizeDigit(c){
+ const out=document.createElement("canvas");out.width=84;out.height=150;
+ const ctx=out.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,out.width,out.height);
+ const scale=Math.min(out.width/c.width,out.height/c.height);
+ const dw=Math.round(c.width*scale),dh=Math.round(c.height*scale);
+ ctx.drawImage(c,0,0,c.width,c.height,(out.width-dw)/2,(out.height-dh)/2,dw,dh);
+ return out;
 }
 
-function normalizedDifferenceForBox(b){
-  const c=cropDigit(b);
-  const raw=differenceImage(c);
-  const bb=occupancyBounds(raw.diff,raw.w,raw.h);
-
-  // Build a cropped source image first, then normalize to a stable aspect ratio.
-  const crop=document.createElement("canvas");
-  crop.width=Math.max(1,bb.x2-bb.x1+1);
-  crop.height=Math.max(1,bb.y2-bb.y1+1);
-  crop.getContext("2d").drawImage(
-    c,
-    bb.x1,bb.y1,crop.width,crop.height,
-    0,0,crop.width,crop.height
-  );
-
-  // HEM-7271T 7-seg digits are tall. Force every digit to the same canvas so
-  // segment zones line up even when the original blue box has extra whitespace.
-  const norm=document.createElement("canvas");
-  norm.width=84; norm.height=150;
-  const nctx=norm.getContext("2d");
-  nctx.fillStyle="#fff"; nctx.fillRect(0,0,norm.width,norm.height);
-
-  // Preserve aspect ratio, center inside the canonical digit canvas.
-  const scale=Math.min(norm.width/crop.width,norm.height/crop.height);
-  const dw=Math.max(1,Math.round(crop.width*scale));
-  const dh=Math.max(1,Math.round(crop.height*scale));
-  const dx=Math.round((norm.width-dw)/2);
-  const dy=Math.round((norm.height-dh)/2);
-  nctx.imageSmoothingEnabled=true;
-  nctx.imageSmoothingQuality="high";
-  nctx.drawImage(crop,0,0,crop.width,crop.height,dx,dy,dw,dh);
-
-  return {...differenceImage(norm), source:norm, bounds:bb};
-}
-
-function classifyDigit(b){
- const {diff,w,h,source,bounds}=normalizedDifferenceForBox(b);
+function classifyDigit(c){
+ const normCanvas=normalizeDigit(c),{diff,w,h}=diffFor(normCanvas);
  const vals=ZONES.map(z=>meanRegion(diff,w,h,z));
- const max=Math.max(...vals),min=Math.min(...vals);
- const norm=vals.map(v=>max>min?(v-min)/(max-min):0);
+ const max=Math.max(...vals),min=Math.min(...vals),norm=vals.map(v=>max>min?(v-min)/(max-min):0);
 
  let cand=[];
  for(const [digit,pat] of Object.entries(PAT)){
-   let err=0;
-   for(let i=0;i<7;i++){
-     const target=pat[i]?0.78:0.15;
-     err+=(norm[i]-target)*(norm[i]-target);
-   }
-   cand.push({digit:Number(digit),err});
+  let err=0;
+  for(let i=0;i<7;i++){const target=pat[i]?0.78:0.15;err+=(norm[i]-target)*(norm[i]-target)}
+  cand.push({digit:Number(digit),err});
  }
  cand.sort((a,b)=>a.err-b.err);
- const best=cand[0],second=cand[1];
- const margin=second.err-best.err;
+ const margin=cand[1].err-cand[0].err;
  const confidence=Math.max(0,Math.min(1,margin/0.30));
-
- return {
-   n: confidence>=0.38 ? best.digit : null,
-   confidence, vals, norm, best:best.err, second:second.err,
-   canvas:makeDiffCanvas(diff,w,h),
-   bounds
- };
+ return {n:confidence>=.35?cand[0].digit:null,confidence,vals,norm};
 }
 
-function makeDiffCanvas(diff,w,h){
- const c=document.createElement("canvas");c.width=w;c.height=h;
- const ctx=c.getContext("2d"),im=ctx.createImageData(w,h);
- let max=Math.max(...diff);if(max<1)max=1;
- for(let i=0;i<diff.length;i++){
-  const v=255-Math.round(Math.min(1,diff[i]/max)*255);
-  const j=i*4;im.data[j]=im.data[j+1]=im.data[j+2]=v;im.data[j+3]=255;
- }
- ctx.putImageData(im,0,0);return c;
+function analyzeRow(def){
+ const row=cropRow(def),split=splitDigits(row,def.digits);
+ const rs=split.digits.map(classifyDigit);
+ const value=rs.every(r=>r.n!==null)?Number(rs.map(r=>r.n).join("")):null;
+ return {row,split,rs,value};
 }
 
-function group(groupName){
- const rs=boxes.filter(b=>b.group===groupName).map(classifyDigit);
- const ok=rs.every(r=>r.n!==null);
- return {rs,value:ok?Number(rs.map(r=>r.n).join("")):null};
-}
-
-function drawDebug(S,D,P){
- $("debuggrid").style.display="grid";
- const paint=(obj,id)=>{
-   const c=$(id),ctx=c.getContext("2d");c.width=300;c.height=150;ctx.fillStyle="#fff";ctx.fillRect(0,0,300,150);
-   obj.rs.forEach((r,i)=>ctx.drawImage(r.canvas,i*95+5,10,85,130));
- };
- paint(S,"dbgSys");paint(D,"dbgDia");paint(P,"dbgPulse");
+function drawRowDebug(obj,id){
+ const c=$(id),ctx=c.getContext("2d");c.width=700;c.height=150;ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);
+ ctx.drawImage(obj.row,0,0,c.width,c.height);
+ ctx.strokeStyle="#111";ctx.lineWidth=2;
+ obj.split.cuts.slice(1,-1).forEach(x=>{
+  const px=x/obj.row.width*c.width;ctx.beginPath();ctx.moveTo(px,0);ctx.lineTo(px,c.height);ctx.stroke();
+ });
 }
 
 $("readBtn").onclick=()=>{
- const S=group("sys"),D=group("dia"),P=group("pulse");
- drawDebug(S,D,P);
- $("results").style.display="grid";$("debug").style.display="block";
+ const S=analyzeRow(ROWS.sys),D=analyzeRow(ROWS.dia),P=analyzeRow(ROWS.pulse);
+ $("results").style.display="grid";$("rowdebug").style.display="grid";$("debug").style.display="block";
+ drawRowDebug(S,"dbgSys");drawRowDebug(D,"dbgDia");drawRowDebug(P,"dbgPulse");
 
  const show=(obj,id,input,min,max)=>{
-  if(obj.value!==null&&obj.value>=min&&obj.value<=max){
-   $(id).textContent=obj.value;$(input).value=obj.value;
-  }else{
-   $(id).textContent="?";$(input).value="";
-  }
+  if(obj.value!==null&&obj.value>=min&&obj.value<=max){$(id).textContent=obj.value;$(input).value=obj.value}
+  else{$(id).textContent="?";$(input).value=""}
  };
  show(S,"rSys","sys",70,250);show(D,"rDia","dia",35,150);show(P,"rPulse","pulse",35,200);
 
- const fmt=(name,obj)=>name+" "+obj.rs.map(r=>`${r.n??"?"} conf=${r.confidence.toFixed(2)} trim=${r.bounds.ok?"auto":"fallback"} vals=${r.vals.map(v=>v.toFixed(1)).join(",")} norm=${r.norm.map(v=>v.toFixed(2)).join(",")}`).join(" / ");
+ const fmt=(name,obj)=>name+" "+obj.rs.map(r=>`${r.n??"?"} conf=${r.confidence.toFixed(2)} norm=${r.norm.map(v=>v.toFixed(2)).join(",")}`).join(" / ");
  $("debug").textContent=fmt("SYS",S)+"\n"+fmt("DIA",D)+"\n"+fmt("PULSE",P);
 
  if(S.value!==null&&D.value!==null&&P.value!==null&&S.value>D.value){
-  $("status").textContent=`画像根拠あり：${S.value}/${D.value}、脈拍 ${P.value}。写真と照合してください。`;
+  $("status").textContent=`自動分割結果：${S.value}/${D.value}、脈拍 ${P.value}。写真と照合してください。`;
  }else{
-  $("status").textContent="候補差が小さい桁は「?」です。無理な補完はしていません。";
+  $("status").textContent="自動分割または数字判定の信頼度が不足しています。ログを送ってください。";
  }
 };
 
