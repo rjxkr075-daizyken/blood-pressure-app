@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v3</title>
+<title>HEM-7271T 血圧フォト記録 v4</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -42,8 +42,8 @@ th{color:var(--muted)}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v3</h1>
-<div class="sub">7セグ液晶専用判定・OCR不使用</div>
+<h1>HEM-7271T 血圧フォト記録 v4</h1>
+<div class="sub">7セグ液晶専用判定・局所コントラスト方式</div>
 
 <div class="card">
   <div class="row">
@@ -55,9 +55,9 @@ th{color:var(--muted)}
   <img id="preview" class="preview" style="display:none">
 
   <div class="rangegrid">
-    <label>液晶の濃さ補正（写真ごとの調整用）</label>
+    <label>判定感度（誤って全部点灯する場合は＋方向）</label>
     <span id="thresholdLabel" class="badge">0</span>
-    <input id="thresholdAdj" type="range" min="-40" max="40" value="0">
+    <input id="thresholdAdj" type="range" min="-30" max="30" value="0">
     <span></span>
   </div>
 
@@ -100,7 +100,7 @@ th{color:var(--muted)}
 </div>
 
 <script>
-const KEY="bp_hem7271t_records_v3";
+const KEY="bp_hem7271t_records_v4";
 const $=id=>document.getElementById(id);
 $("date").value=new Date().toISOString().slice(0,10);
 let file=null, sourceImage=null;
@@ -201,21 +201,55 @@ function grayscaleStats(canvas){
   return {q20:q(.20),q50:q(.50),q80:q(.80)};
 }
 
-function segmentScore(canvas,rect,threshold){
-  const ctx=canvas.getContext("2d",{willReadFrequently:true});
-  const [x1,y1,x2,y2]=rect;
-  const sx=Math.floor(x1*canvas.width), sy=Math.floor(y1*canvas.height);
-  const sw=Math.max(1,Math.floor((x2-x1)*canvas.width)), sh=Math.max(1,Math.floor((y2-y1)*canvas.height));
-  const d=ctx.getImageData(sx,sy,sw,sh).data;
-  let dark=0,total=0;
-  for(let i=0;i<d.length;i+=4){
-    const g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
-    if(g<threshold)dark++;
-    total++;
+function meanGray(ctx,x,y,w,h){
+  const d=ctx.getImageData(x,y,w,h).data;
+  let sum=0,n=0;
+  for(let i=0;i<d.length;i+=16){
+    sum += .299*d[i]+.587*d[i+1]+.114*d[i+2];
+    n++;
   }
-  return dark/total;
+  return n ? sum/n : 255;
 }
 
+function segmentContrast(canvas,rect){
+  const ctx=canvas.getContext("2d",{willReadFrequently:true});
+  const [x1,y1,x2,y2]=rect;
+  const W=canvas.width,H=canvas.height;
+
+  const sx=Math.max(0,Math.floor(x1*W));
+  const sy=Math.max(0,Math.floor(y1*H));
+  const ex=Math.min(W,Math.ceil(x2*W));
+  const ey=Math.min(H,Math.ceil(y2*H));
+  const sw=Math.max(2,ex-sx), sh=Math.max(2,ey-sy);
+
+  // Inner core: likely segment pixels.
+  const mx=Math.max(1,Math.floor(sw*.20));
+  const my=Math.max(1,Math.floor(sh*.20));
+  const inner=meanGray(ctx,sx+mx,sy+my,Math.max(1,sw-2*mx),Math.max(1,sh-2*my));
+
+  // Local surrounding ring. This compensates for LCD background darkness,
+  // shadows, exposure and viewing angle.
+  const padX=Math.max(3,Math.floor(sw*.45));
+  const padY=Math.max(3,Math.floor(sh*.45));
+  const ox=Math.max(0,sx-padX), oy=Math.max(0,sy-padY);
+  const ow=Math.min(W-ox,sw+2*padX), oh=Math.min(H-oy,sh+2*padY);
+
+  const topH=Math.max(1,sy-oy);
+  const botY=ey;
+  const leftW=Math.max(1,sx-ox);
+  const rightX=ex;
+
+  let samples=[];
+  if(topH>0)samples.push(meanGray(ctx,ox,oy,ow,topH));
+  if(botY<oy+oh)samples.push(meanGray(ctx,ox,botY,ow,oy+oh-botY));
+  if(leftW>0)samples.push(meanGray(ctx,ox,sy,leftW,sh));
+  if(rightX<ox+ow)samples.push(meanGray(ctx,rightX,sy,ox+ow-rightX,sh));
+
+  const surround=samples.length?samples.reduce((a,b)=>a+b,0)/samples.length:255;
+
+  // Positive means the segment core is darker than its immediate background.
+  return {contrast:surround-inner,inner,surround};
+}
 function nearestDigit(bits,scores){
   if(DIGIT_MAP[bits]!==undefined)return {digit:DIGIT_MAP[bits],distance:0};
   let best={digit:null,distance:99};
@@ -231,19 +265,27 @@ function nearestDigit(bits,scores){
 }
 
 function detectDigit(canvas){
-  const st=grayscaleStats(canvas);
   const adj=Number($("thresholdAdj").value);
-  // adaptive threshold between dark LCD segments and screen background
-  const threshold=Math.max(55,Math.min(190,(st.q20+st.q80)/2+adj));
 
-  const scores=SEG_ORDER.map(k=>segmentScore(canvas,SEG[k],threshold));
-  // A segment is "on" if enough pixels in its region are dark.
-  // adaptive cutoff; larger side segments tend to score lower due to slant.
-  const bits=scores.map((v,i)=>v>(i===0||i===3||i===6?.16:.12)?"1":"0").join("");
-  const n=nearestDigit(bits,scores);
-  return {digit:n.digit,bits,scores,threshold,distance:n.distance};
+  const measures=SEG_ORDER.map(k=>segmentContrast(canvas,SEG[k]));
+  const contrasts=measures.map(m=>m.contrast);
+
+  // v4: no global grayscale threshold.
+  // A segment is ON only when it is measurably darker than its own surroundings.
+  // Slider now adjusts the required local contrast.
+  const requiredContrast=Math.max(3,12 + adj*.20);
+  const bits=contrasts.map(v=>v>requiredContrast?"1":"0").join("");
+
+  const n=nearestDigit(bits,contrasts);
+  return {
+    digit:n.digit,
+    bits,
+    scores:contrasts,
+    threshold:requiredContrast,
+    distance:n.distance,
+    measures
+  };
 }
-
 function readRow(screen,row){
   let digits=[],debug=[];
   for(const [x1,x2] of row.xs){
@@ -288,16 +330,17 @@ $("readBtn").addEventListener("click",()=>{
     if(p.dia)$("dia").value=p.dia;
     if(p.pulse)$("pulse").value=p.pulse;
 
+    const fmt=r=>r.debug.map(x=>`${x.bits}[${x.scores.map(v=>v.toFixed(1)).join(",")}]`).join("/");
     const dbg = [
-      `SYS bits:${rs.debug.map(x=>x.bits).join("/")}`,
-      `DIA bits:${rd.debug.map(x=>x.bits).join("/")}`,
-      `PULSE bits:${rp.debug.map(x=>x.bits).join("/")}`
+      `SYS bits:${fmt(rs)}`,
+      `DIA bits:${fmt(rd)}`,
+      `PULSE bits:${fmt(rp)}`
     ].join("  ");
 
     if(p.sys&&p.dia&&p.pulse){
       $("status").textContent=`自動入力しました：${p.sys}/${p.dia} mmHg、脈拍 ${p.pulse}。写真と照合してください。 ${dbg}`;
     }else{
-      $("status").textContent=`一部を判定できませんでした。濃さ補正を少し動かして再読み取りしてください。 ${dbg}`;
+      $("status").textContent=`一部を判定できませんでした。全て1111111なら感度を＋方向、全て0000000なら－方向へ少し動かして再読み取りしてください。 ${dbg}`;
     }
   }catch(e){
     console.error(e);
