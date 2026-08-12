@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v17</title>
+<title>HEM-7271T 血圧フォト記録 v18</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -36,8 +36,11 @@ label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
 .stat{padding:11px;background:#f9fafb;border:1px solid var(--line);border-radius:13px}.stat b{font-size:19px;display:block}.stat span{font-size:11px;color:var(--muted)}
 table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1px solid var(--line);font-size:13px;text-align:left}th{color:var(--muted)}
 svg{width:100%;height:230px;display:block}
-#presetStage{position:relative;margin-top:12px;touch-action:none;user-select:none}
-#presetCanvas{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:14px;background:#eee}
+#presetStage{display:none}
+.zoomCalib{margin-top:12px;border:1px solid var(--line);border-radius:16px;padding:10px;background:#fafafa}
+.zoomCalib b{display:block;margin-bottom:7px}
+.zoomStage{position:relative;touch-action:none;user-select:none;overflow:hidden;border-radius:12px}
+.zoomCanvas{display:block;width:100%;height:auto;background:#eee;border-radius:12px}
 .presetBox{position:absolute;border:2px solid #2563eb;background:#2563eb18;border-radius:8px;touch-action:none}
 .presetBox span{position:absolute;left:2px;top:2px;background:#2563eb;color:#fff;border-radius:5px;padding:2px 5px;font-size:10px;font-weight:700}
 .presetBox.selected{border-color:#dc2626;background:#dc262618}
@@ -47,8 +50,8 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v17</h1>
-<div class="sub">青枠の移動・サイズ変更 + 部分認識表示</div>
+<h1>HEM-7271T 血圧フォト記録 v18</h1>
+<div class="sub">3段ズーム校正 + 保存枠を優先した認識</div>
 
 <div class="card">
  <div class="row">
@@ -70,8 +73,13 @@ svg{width:100%;height:230px;display:block}
 
 <div class="card">
  <strong>HEM-7271T 桁位置プリセット</strong>
- <div class="sub">最初の1回だけ、7個の青枠を各数字に合わせます。枠は移動だけでなく右下の赤丸で大きさも変更できます。保存後は次回から自動で呼び出します。</div>
- <div id="presetStage" style="display:none"><canvas id="presetCanvas" width="900" height="700"></canvas></div>
+ <div class="sub">最初の1回だけ、SYS・DIA・PULSEをそれぞれ大きく表示して青枠を合わせます。青枠は移動でき、右下の赤丸で大きさも変更できます。保存後は次回から自動で呼び出します。</div>
+ <div id="presetStage"></div>
+ <div id="zoomCalibs" style="display:none">
+  <div class="zoomCalib"><b>SYS 3桁</b><div id="zoomSys" class="zoomStage"><canvas id="zoomSysCanvas" class="zoomCanvas" width="900" height="300"></canvas></div></div>
+  <div class="zoomCalib"><b>DIA 2桁</b><div id="zoomDia" class="zoomStage"><canvas id="zoomDiaCanvas" class="zoomCanvas" width="900" height="300"></canvas></div></div>
+  <div class="zoomCalib"><b>PULSE 2桁</b><div id="zoomPulse" class="zoomStage"><canvas id="zoomPulseCanvas" class="zoomCanvas" width="900" height="300"></canvas></div></div>
+ </div>
  <div class="row" style="margin-top:10px">
   <button id="readBtn" disabled>HEM-7271T専用解析</button>
   <button id="savePresetBtn" class="secondary" disabled>桁位置を保存</button>
@@ -133,7 +141,7 @@ const PAT={
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
 };
 
-const PRESET_KEY="bp_hem7271t_digit_preset_v17";
+const PRESET_KEY="bp_hem7271t_digit_preset_v18";
 const DEFAULT_DIGIT_BOXES={
  sys:[
   {id:"s1",label:"SYS1",x:.17,y:.18,w:.12,h:.31},
@@ -171,81 +179,69 @@ function syncPreset(flat){
   pulse:flat.filter(b=>b.group==="pulse").map(({group,...r})=>r)
  };
 }
+const ZOOM_REGIONS={
+ sys:{x:.10,y:.12,w:.60,h:.40,stage:"zoomSys",canvas:"zoomSysCanvas"},
+ dia:{x:.25,y:.38,w:.42,h:.37,stage:"zoomDia",canvas:"zoomDiaCanvas"},
+ pulse:{x:.33,y:.64,w:.37,h:.29,stage:"zoomPulse",canvas:"zoomPulseCanvas"}
+};
+
 function buildPresetOverlay(){
- const stage=$("presetStage"),canvas=$("presetCanvas"),ctx=canvas.getContext("2d");
- ctx.clearRect(0,0,canvas.width,canvas.height);
- ctx.drawImage(rc,0,0,canvas.width,canvas.height);
- stage.style.display="block";
- [...stage.querySelectorAll(".presetBox")].forEach(x=>x.remove());
+ $("zoomCalibs").style.display="block";
  const flat=flatPreset();
+ for(const group of ["sys","dia","pulse"]){
+   const reg=ZOOM_REGIONS[group],stage=$(reg.stage),canvas=$(reg.canvas),ctx=canvas.getContext("2d");
+   ctx.clearRect(0,0,canvas.width,canvas.height);
+   ctx.drawImage(rc,reg.x*rc.width,reg.y*rc.height,reg.w*rc.width,reg.h*rc.height,0,0,canvas.width,canvas.height);
+   [...stage.querySelectorAll(".presetBox")].forEach(x=>x.remove());
+   flat.forEach((b,i)=>{
+     if(b.group!==group)return;
+     const d=document.createElement("div");d.className="presetBox";d.dataset.i=i;
+     const s=document.createElement("span");s.textContent=b.label;d.appendChild(s);
+     const rh=document.createElement("div");rh.className="resizeHandle";d.appendChild(rh);
+     stage.appendChild(d);
 
- flat.forEach((b,i)=>{
-   const d=document.createElement("div");
-   d.className="presetBox";
-   d.dataset.i=i;
-
-   const s=document.createElement("span");
-   s.textContent=b.label;
-   d.appendChild(s);
-
-   const rh=document.createElement("div");
-   rh.className="resizeHandle";
-   d.appendChild(rh);
-
-   stage.appendChild(d);
-
-   // Move box
-   d.onpointerdown=e=>{
-     if(e.target===rh)return;
-     e.preventDefault();
-     d.setPointerCapture(e.pointerId);
-     [...stage.querySelectorAll(".presetBox")].forEach(x=>x.classList.remove("selected"));
-     d.classList.add("selected");
-
-     const r=canvas.getBoundingClientRect(),sx=e.clientX,sy=e.clientY,start={x:b.x,y:b.y};
-     d.onpointermove=ev=>{
-       b.x=Math.max(0,Math.min(1-b.w,start.x+(ev.clientX-sx)/r.width));
-       b.y=Math.max(0,Math.min(1-b.h,start.y+(ev.clientY-sy)/r.height));
-       positionPreset(flat);
+     d.onpointerdown=e=>{
+       if(e.target===rh)return;
+       e.preventDefault();d.setPointerCapture(e.pointerId);
+       [...document.querySelectorAll(".presetBox")].forEach(x=>x.classList.remove("selected"));d.classList.add("selected");
+       const r=canvas.getBoundingClientRect(),sx=e.clientX,sy=e.clientY,start={x:b.x,y:b.y};
+       d.onpointermove=ev=>{
+         b.x=Math.max(reg.x,Math.min(reg.x+reg.w-b.w,start.x+(ev.clientX-sx)/r.width*reg.w));
+         b.y=Math.max(reg.y,Math.min(reg.y+reg.h-b.h,start.y+(ev.clientY-sy)/r.height*reg.h));
+         positionPreset(flat);
+       };
+       d.onpointerup=()=>{d.onpointermove=null;syncPreset(flat)};
      };
-     d.onpointerup=()=>{
-       d.onpointermove=null;
-       syncPreset(flat);
-     };
-   };
 
-   // Resize box from bottom-right
-   rh.onpointerdown=e=>{
-     e.preventDefault();
-     e.stopPropagation();
-     rh.setPointerCapture(e.pointerId);
-     [...stage.querySelectorAll(".presetBox")].forEach(x=>x.classList.remove("selected"));
-     d.classList.add("selected");
-
-     const r=canvas.getBoundingClientRect(),sx=e.clientX,sy=e.clientY,start={w:b.w,h:b.h};
-     rh.onpointermove=ev=>{
-       const nw=start.w+(ev.clientX-sx)/r.width;
-       const nh=start.h+(ev.clientY-sy)/r.height;
-       b.w=Math.max(.06,Math.min(.30,Math.min(1-b.x,nw)));
-       b.h=Math.max(.10,Math.min(.45,Math.min(1-b.y,nh)));
-       positionPreset(flat);
+     rh.onpointerdown=e=>{
+       e.preventDefault();e.stopPropagation();rh.setPointerCapture(e.pointerId);
+       [...document.querySelectorAll(".presetBox")].forEach(x=>x.classList.remove("selected"));d.classList.add("selected");
+       const r=canvas.getBoundingClientRect(),sx=e.clientX,sy=e.clientY,start={w:b.w,h:b.h};
+       rh.onpointermove=ev=>{
+         const nw=start.w+(ev.clientX-sx)/r.width*reg.w;
+         const nh=start.h+(ev.clientY-sy)/r.height*reg.h;
+         b.w=Math.max(.06,Math.min(.28,Math.min(reg.x+reg.w-b.x,nw)));
+         b.h=Math.max(.10,Math.min(.42,Math.min(reg.y+reg.h-b.y,nh)));
+         positionPreset(flat);
+       };
+       rh.onpointerup=()=>{rh.onpointermove=null;syncPreset(flat)};
      };
-     rh.onpointerup=()=>{
-       rh.onpointermove=null;
-       syncPreset(flat);
-     };
-   };
- });
-
+   });
+ }
  positionPreset(flat);
 }
+
 function positionPreset(flat=flatPreset()){
- const r=$("presetCanvas").getBoundingClientRect();
- [...$("presetStage").querySelectorAll(".presetBox")].forEach(d=>{
-  const b=flat[Number(d.dataset.i)];
-  d.style.left=(b.x*r.width)+"px"; d.style.top=(b.y*r.height)+"px";
-  d.style.width=(b.w*r.width)+"px"; d.style.height=(b.h*r.height)+"px";
- });
+ for(const group of ["sys","dia","pulse"]){
+   const reg=ZOOM_REGIONS[group],canvas=$(reg.canvas),stage=$(reg.stage),r=canvas.getBoundingClientRect();
+   [...stage.querySelectorAll(".presetBox")].forEach(d=>{
+     const b=flat[Number(d.dataset.i)];
+     d.style.left=((b.x-reg.x)/reg.w*r.width)+"px";
+     d.style.top=((b.y-reg.y)/reg.h*r.height)+"px";
+     d.style.width=(b.w/reg.w*r.width)+"px";
+     d.style.height=(b.h/reg.h*r.height)+"px";
+   });
+ }
 }
 window.addEventListener("resize",()=>positionPreset());
 $("savePresetBtn").onclick=()=>{
@@ -313,7 +309,7 @@ function rectify(){
  rctx.putImageData(dst,0,0);rc.style.display="block";
  loadPreset(); buildPresetOverlay();
  ["readBtn","savePresetBtn","resetPresetBtn"].forEach(id=>$(id).disabled=false);
- $("status").textContent="青枠が各数字に合っているか確認し、必要なら一度だけ調整して保存してください。";
+ $("status").textContent="SYS・DIA・PULSEを大きく表示しました。青枠に数字1個が丸ごと入るよう調整して保存してください。";
 }
 $("rectifyBtn").onclick=rectify;
 
@@ -366,35 +362,15 @@ function diffFor(c){
 // 固定枠内だけで、数字本体の中心を小さく探索する。
 // 探索量を制限して、隣の桁へ飛びつかないようにする。
 function refineDigitCrop(c){
- const {diff,w,h}=diffFor(c);
- let best={score:-1,x1:0,y1:0,x2:w,y2:h};
- const shifts=[-.10,-.05,0,.05,.10];
- const scales=[.82,.90,.98];
-
- for(const sx of shifts) for(const sy of shifts) for(const sc of scales){
-   const bw=Math.max(10,Math.round(w*sc));
-   const bh=Math.max(10,Math.round(h*sc));
-   let x1=Math.round((w-bw)/2 + sx*w);
-   let y1=Math.round((h-bh)/2 + sy*h);
-   x1=Math.max(0,Math.min(w-bw,x1));
-   y1=Math.max(0,Math.min(h-bh,y1));
-   const x2=x1+bw,y2=y1+bh;
-   let s=0,n=0;
-   for(let y=y1;y<y2;y++){
-     for(let x=x1;x<x2;x++){
-       s+=diff[y*w+x];n++;
-     }
-   }
-   const score=n?s/n:0;
-   if(score>best.score)best={score,x1,y1,x2,y2};
- }
-
- const out=document.createElement("canvas");
- out.width=84;out.height=150;
- const ctx=out.getContext("2d");
- ctx.fillStyle="#fff";ctx.fillRect(0,0,out.width,out.height);
- ctx.drawImage(c,best.x1,best.y1,best.x2-best.x1,best.y2-best.y1,0,0,out.width,out.height);
- return {canvas:out,refine:best};
+ // V18: 保存した青枠を優先。内部で大きく位置を探し直さない。
+ const insetX=Math.max(0,Math.round(c.width*.02));
+ const insetY=Math.max(0,Math.round(c.height*.02));
+ const sw=Math.max(10,c.width-insetX*2),sh=Math.max(10,c.height-insetY*2);
+ const out=document.createElement("canvas");out.width=84;out.height=150;
+ const ctx=out.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,out.width,out.height);
+ ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+ ctx.drawImage(c,insetX,insetY,sw,sh,0,0,out.width,out.height);
+ return {canvas:out,refine:{x1:insetX,y1:insetY,x2:insetX+sw,y2:insetY+sh,mode:"preset"}};
 }
 
 function meanRegion(diff,w,h,rect){
@@ -477,7 +453,7 @@ $("readBtn").onclick=()=>{
  show(P,"rPulse","pulse",35,200);
 
  const fmt=(name,obj)=>name+" "+obj.rs.map(r=>
-   `${r.n??"?"} conf=${r.confidence.toFixed(2)} norm=${r.norm.map(v=>v.toFixed(2)).join(",")} refine=${r.refine.x1},${r.refine.y1},${r.refine.x2},${r.refine.y2}`
+   `${r.n??"?"} conf=${r.confidence.toFixed(2)} norm=${r.norm.map(v=>v.toFixed(2)).join(",")} crop=${r.refine.mode}`
  ).join(" / ");
  $("debug").textContent=fmt("SYS",S)+"\n"+fmt("DIA",D)+"\n"+fmt("PULSE",P);
 
