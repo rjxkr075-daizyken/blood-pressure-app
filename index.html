@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v9</title>
+<title>HEM-7271T 血圧フォト記録 v10</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c;--blue:#2563eb}
 *{box-sizing:border-box}
@@ -16,7 +16,8 @@ h1{font-size:24px;margin:6px 0}.sub,.status{color:var(--muted);font-size:14px;li
 button,.filebtn{display:inline-block;border:0;border-radius:12px;padding:12px 14px;font-size:15px;font-weight:700;background:var(--accent);color:#fff;cursor:pointer}
 .secondary{background:#e5e7eb;color:#111827}.danger{background:#fee2e2;color:var(--danger)}
 input[type=file]{display:none}
-input[type=number],input[type=date],input[type=text]{width:100%;padding:11px;border:1px solid var(--line);border-radius:11px;font-size:16px}
+input[type=number],input[type=date],input[type=text],input[type=range]{width:100%}
+input[type=number],input[type=date],input[type=text]{padding:11px;border:1px solid var(--line);border-radius:11px;font-size:16px}
 .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}.grow{flex:1}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
@@ -26,28 +27,23 @@ label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
 .guide{position:absolute;border:2px dashed #111827;pointer-events:none}
 .digitbox{position:absolute;border:2px solid var(--blue);background:#2563eb18;border-radius:8px;touch-action:none}
 .digitbox span{position:absolute;left:2px;top:2px;background:var(--blue);color:#fff;border-radius:5px;padding:2px 5px;font-size:10px;font-weight:700}
-.digitbox.selected{border-color:#dc2626;background:#dc262618}
 .notice{padding:10px 12px;border-radius:12px;background:#fff7ed;font-size:13px;line-height:1.5;margin-top:10px}
 .results{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
 .result{background:#f9fafb;border:1px solid var(--line);border-radius:13px;padding:10px;text-align:center}
 .result b{display:block;font-size:22px}.result span{font-size:11px;color:var(--muted)}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .stat{padding:11px;background:#f9fafb;border:1px solid var(--line);border-radius:13px}.stat b{font-size:19px;display:block}.stat span{font-size:11px;color:var(--muted)}
-svg{width:100%;height:230px;display:block}
 table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1px solid var(--line);font-size:13px;text-align:left}th{color:var(--muted)}
-.learnrow{display:grid;grid-template-columns:repeat(10,1fr);gap:5px;margin-top:10px}
-.learnchip{padding:6px 4px;border-radius:999px;background:#eef2f7;text-align:center;font-size:12px}
-.debuggrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
-.debugbox{border:1px solid var(--line);border-radius:12px;padding:8px;background:#fafafa}
-.debugbox canvas{width:100%;height:140px;object-fit:contain;background:#fff;border-radius:8px}
-.debugbox b{display:block;font-size:12px;margin-bottom:5px}
-@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}.learnrow{grid-template-columns:repeat(5,1fr)}.debuggrid{grid-template-columns:1fr}}
+svg{width:100%;height:230px;display:block}
+.range{display:grid;grid-template-columns:1fr 90px;gap:8px;align-items:center;margin-top:10px}
+.debug{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:pre-wrap;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:10px}
+@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v9</h1>
-<div class="sub">数字本体の自動切り詰め + 実機学習 + 7セグ形状 + 血圧整合性</div>
+<h1>HEM-7271T 血圧フォト記録 v10</h1>
+<div class="sub">局所コントラストで7セグを直接判定</div>
 
 <div class="card">
  <div class="row">
@@ -67,12 +63,17 @@ table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1p
 
 <div class="card">
  <strong>数字枠の位置合わせ</strong>
- <div class="sub">青い枠を各数字に重ねます。保存済みの枠位置があれば自動で呼び出します。</div>
+ <div class="sub">青い枠を各数字に重ねます。保存済み位置は自動で呼び出します。</div>
  <div id="rectStage" style="display:none"><canvas id="rectified" width="900" height="700"></canvas></div>
  <div class="row" style="margin-top:10px">
-   <button id="readBtn" disabled>読み取る</button>
-   <button id="saveCalibBtn" class="secondary" disabled>枠位置を保存</button>
-   <button id="resetBoxesBtn" class="secondary" disabled>枠を初期位置へ</button>
+  <button id="readBtn" disabled>読み取る</button>
+  <button id="saveCalibBtn" class="secondary" disabled>枠位置を保存</button>
+  <button id="resetBoxesBtn" class="secondary" disabled>枠を初期位置へ</button>
+ </div>
+ <div class="range">
+   <label>セグメント判定感度</label><span id="sensLabel">10</span>
+   <input id="sensitivity" type="range" min="2" max="30" value="10">
+   <span></span>
  </div>
  <div id="status" class="status" style="padding-top:10px">写真を選択してください。</div>
 
@@ -81,20 +82,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1p
   <div class="result"><span>下 DIA</span><b id="rDia">—</b></div>
   <div class="result"><span>脈拍</span><b id="rPulse">—</b></div>
  </div>
-
- <div id="debuggrid" class="debuggrid" style="display:none">
-  <div class="debugbox"><b>SYS 正規化</b><canvas id="dbgSys"></canvas></div>
-  <div class="debugbox"><b>DIA 正規化</b><canvas id="dbgDia"></canvas></div>
-  <div class="debugbox"><b>PULSE 正規化</b><canvas id="dbgPulse"></canvas></div>
- </div>
-</div>
-
-<div class="card">
- <strong>実機学習</strong>
- <div class="sub">読み取り結果が違うとき、正しい「上・下・脈拍」を手入力してから「この写真から学習」を押します。</div>
- <button id="learnBtn" class="secondary">この写真から学習</button>
- <button id="clearLearnBtn" class="danger">学習データ削除</button>
- <div id="learnrow" class="learnrow"></div>
+ <div id="debug" class="debug" style="display:none"></div>
 </div>
 
 <div class="card">
@@ -122,10 +110,11 @@ table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1p
 
 <script>
 const $=id=>document.getElementById(id);
-const KEY="bp_hem7271t_v9", CALKEY="bp_hem7271t_digitboxes_v9", LEARNKEY="bp_hem7271t_learning_v9";
+const KEY="bp_hem7271t_v10", CALKEY="bp_hem7271t_digitboxes_v10";
 $("date").value=new Date().toISOString().slice(0,10);
+$("sensitivity").oninput=()=>{$("sensLabel").textContent=$("sensitivity").value};
 
-let src=null,pts=[],boxes=[],lastFeatures=[];
+let src=null,pts=[],boxes=[];
 const pc=$("photoCanvas"),pctx=pc.getContext("2d",{willReadFrequently:true}),stage=$("stage");
 const rc=$("rectified"),rctx=rc.getContext("2d",{willReadFrequently:true}),rectStage=$("rectStage");
 const handles=[...document.querySelectorAll(".handle")];
@@ -140,11 +129,20 @@ const DEFAULT_BOXES=[
  {id:"p2",label:"P2",group:"pulse",x:.61,y:.69,w:.11,h:.18}
 ];
 
-// canonical 7-seg patterns: a,b,c,d,e,f,g
-const SEG_PATTERNS={
- 0:"1111110",1:"0110000",2:"1101101",3:"1111001",4:"0110011",
- 5:"1011011",6:"1011111",7:"1110000",8:"1111111",9:"1111011"
+const MAP={"1111110":0,"0110000":1,"1101101":2,"1111001":3,"0110011":4,"1011011":5,"1011111":6,"1110000":7,"1111111":8,"1111011":9};
+
+// each segment has a broad target rectangle + nearby background rectangles.
+// coordinates are within a single digit box.
+const SEGMENTS={
+ a:{seg:[.22,.04,.78,.20],bg:[[.22,.22,.78,.31]]},
+ b:{seg:[.67,.12,.96,.47],bg:[[.47,.14,.60,.44]]},
+ c:{seg:[.67,.53,.96,.88],bg:[[.47,.56,.60,.86]]},
+ d:{seg:[.22,.80,.78,.97],bg:[[.22,.69,.78,.77]]},
+ e:{seg:[.04,.53,.33,.88],bg:[[.40,.56,.53,.86]]},
+ f:{seg:[.04,.12,.33,.47],bg:[[.40,.14,.53,.44]]},
+ g:{seg:[.22,.42,.78,.60],bg:[[.22,.32,.78,.39],[.22,.63,.78,.70]]}
 };
+const ORDER=["a","b","c","d","e","f","g"];
 
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
 
@@ -171,14 +169,14 @@ window.addEventListener("resize",()=>{positionHandles();positionBoxes()});
 handles.forEach(h=>{
  const i=Number(h.dataset.i);
  h.onpointerdown=e=>{
-   e.preventDefault();h.setPointerCapture(e.pointerId);
-   h.onpointermove=ev=>{
-     const r=pc.getBoundingClientRect();
-     pts[i].x=Math.max(0,Math.min(pc.width,(ev.clientX-r.left)*pc.width/r.width));
-     pts[i].y=Math.max(0,Math.min(pc.height,(ev.clientY-r.top)*pc.height/r.height));
-     positionHandles();
-   };
-   h.onpointerup=()=>h.onpointermove=null;
+  e.preventDefault();h.setPointerCapture(e.pointerId);
+  h.onpointermove=ev=>{
+   const r=pc.getBoundingClientRect();
+   pts[i].x=Math.max(0,Math.min(pc.width,(ev.clientX-r.left)*pc.width/r.width));
+   pts[i].y=Math.max(0,Math.min(pc.height,(ev.clientY-r.top)*pc.height/r.height));
+   positionHandles();
+  };
+  h.onpointerup=()=>h.onpointermove=null;
  };
 });
 
@@ -207,148 +205,96 @@ $("rectifyBtn").onclick=rectify;
 function makeBoxes(){
  [...rectStage.querySelectorAll(".digitbox")].forEach(x=>x.remove());
  boxes.forEach((b,i)=>{
-   const d=document.createElement("div");d.className="digitbox";d.dataset.i=i;
-   const s=document.createElement("span");s.textContent=b.label;d.appendChild(s);rectStage.appendChild(d);
-   d.onpointerdown=e=>{
-     e.preventDefault();d.setPointerCapture(e.pointerId);
-     [...rectStage.querySelectorAll(".digitbox")].forEach(x=>x.classList.remove("selected"));d.classList.add("selected");
-     const sx=e.clientX,sy=e.clientY,start={x:b.x,y:b.y},r=rc.getBoundingClientRect();
-     d.onpointermove=ev=>{
-       b.x=Math.max(0,Math.min(1-b.w,start.x+(ev.clientX-sx)/r.width));
-       b.y=Math.max(0,Math.min(1-b.h,start.y+(ev.clientY-sy)/r.height));
-       positionBoxes();
-     };
-     d.onpointerup=()=>d.onpointermove=null;
+  const d=document.createElement("div");d.className="digitbox";d.dataset.i=i;
+  const s=document.createElement("span");s.textContent=b.label;d.appendChild(s);rectStage.appendChild(d);
+  d.onpointerdown=e=>{
+   e.preventDefault();d.setPointerCapture(e.pointerId);
+   const sx=e.clientX,sy=e.clientY,start={x:b.x,y:b.y},r=rc.getBoundingClientRect();
+   d.onpointermove=ev=>{
+    b.x=Math.max(0,Math.min(1-b.w,start.x+(ev.clientX-sx)/r.width));
+    b.y=Math.max(0,Math.min(1-b.h,start.y+(ev.clientY-sy)/r.height));
+    positionBoxes();
    };
+   d.onpointerup=()=>d.onpointermove=null;
+  };
  });
 }
 function positionBoxes(){
  const r=rc.getBoundingClientRect();
  [...rectStage.querySelectorAll(".digitbox")].forEach(d=>{
-   const b=boxes[Number(d.dataset.i)];
-   d.style.left=(b.x*r.width)+"px";d.style.top=(b.y*r.height)+"px";
-   d.style.width=(b.w*r.width)+"px";d.style.height=(b.h*r.height)+"px";
+  const b=boxes[Number(d.dataset.i)];
+  d.style.left=(b.x*r.width)+"px";d.style.top=(b.y*r.height)+"px";
+  d.style.width=(b.w*r.width)+"px";d.style.height=(b.h*r.height)+"px";
  });
 }
 $("saveCalibBtn").onclick=()=>{localStorage.setItem(CALKEY,JSON.stringify(boxes));$("status").textContent="数字枠の位置を保存しました。"};
 $("resetBoxesBtn").onclick=()=>{boxes=structuredClone(DEFAULT_BOXES);makeBoxes();positionBoxes();$("status").textContent="数字枠を初期位置へ戻しました。"};
 
-function cropBox(b){
- const x=Math.max(0,Math.round(b.x*rc.width)),y=Math.max(0,Math.round(b.y*rc.height));
- const w=Math.max(2,Math.round(b.w*rc.width)),h=Math.max(2,Math.round(b.h*rc.height));
- const c=document.createElement("canvas");c.width=w;c.height=h;
- c.getContext("2d").drawImage(rc,x,y,w,h,0,0,w,h);
- return c;
+function grayMean(rect,b){
+ const [x1,y1,x2,y2]=rect;
+ const ox=b.x*rc.width,oy=b.y*rc.height,bw=b.w*rc.width,bh=b.h*rc.height;
+ const sx=Math.max(0,Math.floor(ox+x1*bw)),sy=Math.max(0,Math.floor(oy+y1*bh));
+ const ex=Math.min(rc.width,Math.ceil(ox+x2*bw)),ey=Math.min(rc.height,Math.ceil(oy+y2*bh));
+ const d=rctx.getImageData(sx,sy,Math.max(1,ex-sx),Math.max(1,ey-sy)).data;
+ let sum=0,n=0;
+ for(let i=0;i<d.length;i+=4){
+   const g=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+   // robust-ish clipping to reduce fine moire influence
+   sum+=Math.max(20,Math.min(235,g));n++;
+ }
+ return n?sum/n:255;
 }
 
-// suppress moire by downscaling before thresholding
-function denoiseAndBinarize(c){
- const small=document.createElement("canvas");
- const targetW=70,targetH=120;
- small.width=targetW;small.height=targetH;
- const sctx=small.getContext("2d",{willReadFrequently:true});
- sctx.imageSmoothingEnabled=true;sctx.imageSmoothingQuality="high";
- sctx.drawImage(c,0,0,targetW,targetH);
-
- const im=sctx.getImageData(0,0,targetW,targetH),d=im.data;
- let gr=[];for(let i=0;i<d.length;i+=4)gr.push(.299*d[i]+.587*d[i+1]+.114*d[i+2]);
- let sorted=[...gr].sort((a,b)=>a-b);
- const q=p=>sorted[Math.min(sorted.length-1,Math.floor(sorted.length*p))];
- // threshold biased towards dark LCD segments
- const th=q(.33)*.55+q(.72)*.45;
- for(let i=0,j=0;i<d.length;i+=4,j++){
-   const v=gr[j]<th?0:255;d[i]=d[i+1]=d[i+2]=v;d[i+3]=255;
- }
- sctx.putImageData(im,0,0);
- return small;
+function segmentContrast(def,b){
+ const seg=grayMean(def.seg,b);
+ const bgs=def.bg.map(r=>grayMean(r,b));
+ const bg=bgs.reduce((a,c)=>a+c,0)/bgs.length;
+ return bg-seg; // positive => segment darker than local background
 }
 
-// Find bounding box of connected-ish dark mass by row/column occupancy.
-// This trims whitespace and reduces sensitivity to initial digit-box size.
-function autoTrim(bin){
- const ctx=bin.getContext("2d",{willReadFrequently:true}),w=bin.width,h=bin.height,d=ctx.getImageData(0,0,w,h).data;
- const cols=Array(w).fill(0),rows=Array(h).fill(0);
- for(let y=0;y<h;y++)for(let x=0;x<w;x++){
-   const i=(y*w+x)*4;if(d[i]<128){cols[x]++;rows[y]++}
+function recognizeDigit(b){
+ const contrasts=ORDER.map(k=>segmentContrast(SEGMENTS[k],b));
+ const sens=Number($("sensitivity").value);
+ const bits=contrasts.map(v=>v>sens?"1":"0").join("");
+ if(MAP[bits]!==undefined)return {n:MAP[bits],bits,contrasts,dist:0};
+
+ let best={n:null,dist:99};
+ for(const [pat,n] of Object.entries(MAP)){
+   let dist=0;
+   for(let i=0;i<7;i++){
+     // weight mismatches more when measured contrast is far from threshold
+     if(pat[i]!==bits[i]) dist += 1 + Math.min(1,Math.abs(contrasts[i]-sens)/20);
+   }
+   if(dist<best.dist)best={n:Number(n),dist};
  }
- const cx=cols.map(v=>v/h),ry=rows.map(v=>v/w);
- let xs=[],ys=[];
- cx.forEach((v,i)=>{if(v>.04)xs.push(i)});ry.forEach((v,i)=>{if(v>.025)ys.push(i)});
- if(!xs.length||!ys.length)return bin;
- let x1=Math.max(0,Math.min(...xs)-2),x2=Math.min(w-1,Math.max(...xs)+2);
- let y1=Math.max(0,Math.min(...ys)-2),y2=Math.min(h-1,Math.max(...ys)+2);
- // avoid absurdly tiny trims
- if(x2-x1<w*.20||y2-y1<h*.25)return bin;
- const out=document.createElement("canvas");out.width=60;out.height=110;
- out.getContext("2d").drawImage(bin,x1,y1,x2-x1+1,y2-y1+1,0,0,out.width,out.height);
- return out;
+ return {n:best.dist<=2.2?best.n:null,bits,contrasts,dist:best.dist};
 }
 
-// feature vector: coarse 12x22 occupancy + row/col profiles + 7-seg zone occupancy
-function features(norm){
- const ctx=norm.getContext("2d",{willReadFrequently:true}),w=norm.width,h=norm.height,d=ctx.getImageData(0,0,w,h).data;
- const dark=(x,y)=>d[(y*w+x)*4]<128?1:0;
- let vec=[];
- const gx=12,gy=22;
- for(let yy=0;yy<gy;yy++)for(let xx=0;xx<gx;xx++){
-   let s=0,n=0,x1=Math.floor(xx*w/gx),x2=Math.floor((xx+1)*w/gx),y1=Math.floor(yy*h/gy),y2=Math.floor((yy+1)*h/gy);
-   for(let y=y1;y<y2;y++)for(let x=x1;x<x2;x++){s+=dark(x,y);n++}
-   vec.push(n?s/n:0);
- }
- // column + row projections
- for(let xx=0;xx<12;xx++){let s=0,n=0,x1=Math.floor(xx*w/12),x2=Math.floor((xx+1)*w/12);for(let y=0;y<h;y++)for(let x=x1;x<x2;x++){s+=dark(x,y);n++}vec.push(s/n)}
- for(let yy=0;yy<18;yy++){let s=0,n=0,y1=Math.floor(yy*h/18),y2=Math.floor((yy+1)*h/18);for(let y=y1;y<y2;y++)for(let x=0;x<w;x++){s+=dark(x,y);n++}vec.push(s/n)}
- // 7 segment occupancies
- const zones=[[.20,.02,.80,.18],[.70,.10,.98,.48],[.70,.52,.98,.90],[.20,.82,.80,.99],[.02,.52,.30,.90],[.02,.10,.30,.48],[.20,.42,.80,.60]];
- zones.forEach(([a,b,c,e])=>{
-   let s=0,n=0;for(let y=Math.floor(b*h);y<Math.floor(e*h);y++)for(let x=Math.floor(a*w);x<Math.floor(c*w);x++){s+=dark(x,y);n++}vec.push(s/n)
+function groupValue(group){
+ const rs=boxes.filter(b=>b.group===group).map(recognizeDigit);
+ return {rs,value:rs.every(r=>r.n!==null)?Number(rs.map(r=>r.n).join("")):null};
+}
+
+function candidateValue(group){
+ const parts=boxes.filter(b=>b.group===group).map(b=>{
+   const r=recognizeDigit(b);
+   let opts=[];
+   for(const [pat,n] of Object.entries(MAP)){
+     let score=0;
+     for(let i=0;i<7;i++){
+       const target=pat[i]==="1" ? 18 : 0;
+       score += Math.abs(r.contrasts[i]-target);
+     }
+     opts.push({digit:Number(n),score});
+   }
+   opts.sort((a,b)=>a.score-b.score);
+   return opts.slice(0,3);
  });
- return vec;
-}
-function cosine(a,b){
- let ab=0,aa=0,bb=0;for(let i=0;i<a.length;i++){ab+=a[i]*b[i];aa+=a[i]*a[i];bb+=b[i]*b[i]}
- return aa&&bb?ab/Math.sqrt(aa*bb):0;
-}
-function segScore(vec,digit){
- const seg=vec.slice(-7),pat=SEG_PATTERNS[digit];
- let err=0;
- for(let i=0;i<7;i++){
-   const target=pat[i]==="1"?.55:.12;
-   err+=Math.abs(seg[i]-target);
- }
- return Math.max(0,1-err/7);
-}
-function getLearn(){try{return JSON.parse(localStorage.getItem(LEARNKEY)||"{}")}catch{return{}}}
-function saveLearn(v){localStorage.setItem(LEARNKEY,JSON.stringify(v));renderLearn()}
-
-function classify(feat){
- const learned=getLearn(),scores=[];
- for(let digit=0;digit<=9;digit++){
-   const arr=learned[digit]||[];
-   let learnedScore=0;
-   if(arr.length)learnedScore=Math.max(...arr.map(v=>cosine(feat,v)));
-   const shapeScore=segScore(feat,digit);
-   // learned templates dominate when available, but shape acts as regularizer
-   let score=arr.length ? .78*learnedScore+.22*shapeScore : .35*shapeScore;
-   scores.push({digit,score,learned:arr.length>0});
- }
- scores.sort((a,b)=>b.score-a.score);
- return scores.slice(0,4);
-}
-
-function processBox(b){
- const raw=cropBox(b),bin=denoiseAndBinarize(raw),norm=autoTrim(bin),feat=features(norm);
- return {norm,feat,cands:classify(feat),box:b};
-}
-
-function combineCandidates(parts,group){
- let combos=[{digits:"",score:0,details:[]}];
- parts.forEach(p=>{
+ let combos=[{digits:"",score:0}];
+ parts.forEach(arr=>{
    let next=[];
-   p.cands.slice(0,3).forEach(c=>combos.forEach(base=>{
-     next.push({digits:base.digits+c.digit,score:base.score+Math.log(Math.max(c.score,.0001)),details:[...base.details,c]})
-   }));
-   combos=next.sort((a,b)=>b.score-a.score).slice(0,30);
+   combos.forEach(base=>arr.forEach(o=>next.push({digits:base.digits+o.digit,score:base.score+o.score})));
+   combos=next.sort((a,b)=>a.score-b.score).slice(0,40);
  });
  return combos.map(c=>({...c,value:Number(c.digits)})).filter(c=>{
    if(group==="sys")return c.value>=70&&c.value<=250;
@@ -357,55 +303,31 @@ function combineCandidates(parts,group){
  });
 }
 
-function drawDebug(processed){
- const groups={sys:[],dia:[],pulse:[]};processed.forEach(p=>groups[p.box.group].push(p));
- for(const [g,id] of [["sys","dbgSys"],["dia","dbgDia"],["pulse","dbgPulse"]]){
-   const c=$(id),ctx=c.getContext("2d");c.width=300;c.height=150;ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);
-   groups[g].forEach((p,i)=>ctx.drawImage(p.norm,i*95+5,10,85,130));
- }
- $("debuggrid").style.display="grid";
-}
-
 $("readBtn").onclick=()=>{
- const processed=boxes.map(processBox);lastFeatures=processed.map(p=>p.feat);
- drawDebug(processed);
- const gs={sys:processed.filter(p=>p.box.group==="sys"),dia:processed.filter(p=>p.box.group==="dia"),pulse:processed.filter(p=>p.box.group==="pulse")};
- let S=combineCandidates(gs.sys,"sys"),D=combineCandidates(gs.dia,"dia"),P=combineCandidates(gs.pulse,"pulse");
+ const direct={sys:groupValue("sys"),dia:groupValue("dia"),pulse:groupValue("pulse")};
+ let S=candidateValue("sys"),D=candidateValue("dia"),P=candidateValue("pulse");
  let best=null;
- for(const s of S.slice(0,10))for(const d of D.slice(0,10))for(const p of P.slice(0,10)){
+ for(const s of S.slice(0,12))for(const d of D.slice(0,12))for(const p of P.slice(0,12)){
    if(s.value<=d.value)continue;
-   // soft physiological plausibility; don't over-constrain
    let score=s.score+d.score+p.score;
-   if(s.value-d.value>=20&&s.value-d.value<=100)score+=.15;
-   if(d.value>=45&&d.value<=110)score+=.05;
-   if(p.value>=45&&p.value<=130)score+=.05;
-   if(!best||score>best.score)best={s,d,p,score};
+   if(s.value-d.value<20||s.value-d.value>110)score+=30;
+   if(d.value<45||d.value>110)score+=15;
+   if(p.value<45||p.value>130)score+=10;
+   if(!best||score<best.score)best={s,d,p,score};
  }
- $("results").style.display="grid";
+ $("results").style.display="grid";$("debug").style.display="block";
  if(best){
    $("rSys").textContent=best.s.value;$("rDia").textContent=best.d.value;$("rPulse").textContent=best.p.value;
    $("sys").value=best.s.value;$("dia").value=best.d.value;$("pulse").value=best.p.value;
-   const fmt=(part)=>part.details.map(x=>`${x.digit}(${x.score.toFixed(2)},${x.learned?"learned":"shape"})`).join(",");
-   $("status").textContent=`候補: ${best.s.value}/${best.d.value} 脈拍${best.p.value} | SYS ${fmt(best.s)} | DIA ${fmt(best.d)} | PULSE ${fmt(best.p)}`;
  }else{
    $("rSys").textContent=$("rDia").textContent=$("rPulse").textContent="?";
-   $("status").textContent="血圧として整合する候補を作れませんでした。枠位置を確認してください。";
  }
+ const fmt=(g)=>direct[g].rs.map(r=>`${r.n??"?"}[${r.bits}](${r.contrasts.map(v=>v.toFixed(1)).join(",")})`).join(" / ");
+ $("debug").textContent=
+  `SYS ${fmt("sys")}\nDIA ${fmt("dia")}\nPULSE ${fmt("pulse")}\n`+
+  (best?`整合候補: ${best.s.value}/${best.d.value} 脈拍${best.p.value}`:"整合候補なし");
+ $("status").textContent=best?`候補：${best.s.value}/${best.d.value}、脈拍 ${best.p.value}。写真と照合してください。`:"判定できませんでした。感度や枠位置を調整してください。";
 };
-
-$("learnBtn").onclick=()=>{
- if(lastFeatures.length!==boxes.length){alert("先に「読み取る」を押してください。");return}
- const sys=String(Number($("sys").value)),dia=String(Number($("dia").value)),pulse=String(Number($("pulse").value));
- if(sys.length!==3||dia.length!==2||pulse.length!==2){alert("正しい上3桁・下2桁・脈拍2桁を入力してください。");return}
- const truth=(sys+dia+pulse).split("").map(Number),learn=getLearn();
- truth.forEach((digit,i)=>{if(!learn[digit])learn[digit]=[];learn[digit].push(lastFeatures[i]);if(learn[digit].length>30)learn[digit]=learn[digit].slice(-30)});
- saveLearn(learn);$("status").textContent=`この写真を ${sys}/${dia} 脈拍${pulse} として学習しました。`;
-};
-$("clearLearnBtn").onclick=()=>{if(confirm("学習データをすべて削除しますか？")){localStorage.removeItem(LEARNKEY);renderLearn()}};
-
-function renderLearn(){
- const l=getLearn();$("learnrow").innerHTML=Array.from({length:10},(_,i)=>`<div class="learnchip">${i}: ${(l[i]||[]).length}枚</div>`).join("")
-}
 
 function load(){try{return JSON.parse(localStorage.getItem(KEY)||"[]")}catch{return[]}}
 function persist(r){localStorage.setItem(KEY,JSON.stringify(r))}
@@ -429,8 +351,7 @@ function draw(r){
 }
 $("clearBtn").onclick=()=>{if(confirm("全記録を削除しますか？")){localStorage.removeItem(KEY);render()}};
 $("csvBtn").onclick=()=>{const r=load(),rows=[["date","systolic","diastolic","pulse","memo"],...r.map(x=>[x.date,x.sys,x.dia,x.pulse??"",x.memo||""])],csv=rows.map(row=>row.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv"}));a.download="blood_pressure.csv";a.click()};
-
-render();renderLearn();
+render();
 if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
 </script>
 </body></html>
