@@ -48,8 +48,8 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v24 修正版</h1>
-<div class="sub">濃いLCDセグメント分離 + 数字本体トリミング + 1/7/0強化（修正版）</div>
+<h1>HEM-7271T 血圧フォト記録 v24 修正版2</h1>
+<div class="sub">濃いLCDセグメント分離 + 数字本体トリミング + 1/7/0強化（修正版2）</div>
 
 <div class="card">
  <div class="row">
@@ -918,7 +918,8 @@ $("readBtn").onclick=async()=>{
      `trim=${r.refine.mode}:${r.refine.x1},${r.refine.y1},${r.refine.x2},${r.refine.y2} `+
      `cuts=gray:${r.features.absCut.toFixed(1)},contrast:${r.features.conCut.toFixed(1)} crop=v24`
    ).join(" / ");
- $("debug").textContent=log;
+   const log=fmt("SYS",S)+"\n"+fmt("DIA",D)+"\n"+fmt("PULSE",P);
+   $("debug").textContent=log;
 
    setRuntimeLog(
      "解析完了\n"+

@@ -1,16 +1,17 @@
-# HEM-7271T V24 修正版
+# HEM-7271T V24 修正版2
 
-V24で発生した解析エラーを修正しました。
+今回の解析エラーの原因は認識エンジンではなく、
+解析終了時の詳細ログ表示部分でした。
 
-原因:
-- V24で追加した 1 / 7 / 0 強化判定が、extractShapeFeatures() の返す
-  `rel[]` を named field として直接参照していました。
-- V23側のデータ構造との接続が不足していました。
+## 原因
+`fmt()` でSYS/DIA/PULSEのログ文字列を作るコードは存在していましたが、
+それをまとめる `const log = ...` がV24編集時に抜け落ちていました。
 
-修正:
-- `rel[0..6]` を top / mid / bot / leftTop / rightTop / leftBot / rightBot に明示マッピング
-- 判定値に defensive guard を追加
-- NaN が発生しても解析全体を停止しない保護を追加
-- Service Worker のキャッシュ名を変更
+そのため解析自体が終わったあと、
+`$("debug").textContent = log;`
+で ReferenceError になっていました。
 
-認識方式そのものはV24のままです。
+## 修正
+- `const log=fmt("SYS",S)+"\n"+fmt("DIA",D)+"\n"+fmt("PULSE",P);` を復旧
+- 認識方式、自動トリミング、1/7/0強化は変更なし
+- Service Workerキャッシュ名を再変更
