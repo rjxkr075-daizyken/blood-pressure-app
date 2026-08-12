@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v8</title>
+<title>HEM-7271T 血圧フォト記録 v9</title>
 <style>
-:root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
+:root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c;--blue:#2563eb}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .wrap{max-width:800px;margin:auto;padding:18px 14px 44px}
@@ -24,8 +24,8 @@ label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
 #photoCanvas,#rectified{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:14px;background:#eee}
 .handle{position:absolute;width:28px;height:28px;border-radius:50%;background:#111827;border:4px solid #fff;box-shadow:0 1px 6px #0005;transform:translate(-50%,-50%);touch-action:none}
 .guide{position:absolute;border:2px dashed #111827;pointer-events:none}
-.digitbox{position:absolute;border:2px solid #2563eb;background:#2563eb18;border-radius:8px;touch-action:none}
-.digitbox span{position:absolute;left:2px;top:2px;background:#2563eb;color:#fff;border-radius:5px;padding:2px 5px;font-size:10px;font-weight:700}
+.digitbox{position:absolute;border:2px solid var(--blue);background:#2563eb18;border-radius:8px;touch-action:none}
+.digitbox span{position:absolute;left:2px;top:2px;background:var(--blue);color:#fff;border-radius:5px;padding:2px 5px;font-size:10px;font-weight:700}
 .digitbox.selected{border-color:#dc2626;background:#dc262618}
 .notice{padding:10px 12px;border-radius:12px;background:#fff7ed;font-size:13px;line-height:1.5;margin-top:10px}
 .results{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
@@ -35,18 +35,19 @@ label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
 .stat{padding:11px;background:#f9fafb;border:1px solid var(--line);border-radius:13px}.stat b{font-size:19px;display:block}.stat span{font-size:11px;color:var(--muted)}
 svg{width:100%;height:230px;display:block}
 table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1px solid var(--line);font-size:13px;text-align:left}th{color:var(--muted)}
-.calib{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
-.learnbox{background:#f9fafb;border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:12px}
-.learnstats{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-.chip{padding:5px 8px;border-radius:999px;background:#e5e7eb;font-size:12px}
-.chip.ok{background:#dcfce7}
-@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}.calib{grid-template-columns:1fr}}
+.learnrow{display:grid;grid-template-columns:repeat(10,1fr);gap:5px;margin-top:10px}
+.learnchip{padding:6px 4px;border-radius:999px;background:#eef2f7;text-align:center;font-size:12px}
+.debuggrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.debugbox{border:1px solid var(--line);border-radius:12px;padding:8px;background:#fafafa}
+.debugbox canvas{width:100%;height:140px;object-fit:contain;background:#fff;border-radius:8px}
+.debugbox b{display:block;font-size:12px;margin-bottom:5px}
+@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}.learnrow{grid-template-columns:repeat(5,1fr)}.debuggrid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v8</h1>
-<div class="sub">実機学習対応：あなたの血圧計の数字を覚える</div>
+<h1>HEM-7271T 血圧フォト記録 v9</h1>
+<div class="sub">数字本体の自動切り詰め + 実機学習 + 7セグ形状 + 血圧整合性</div>
 
 <div class="card">
  <div class="row">
@@ -54,6 +55,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1p
   <input id="photo" type="file" accept="image/*" capture="environment">
   <button id="rectifyBtn" class="secondary" disabled>液晶を補正</button>
  </div>
+
  <div id="stage" style="display:none">
   <canvas id="photoCanvas"></canvas>
   <div id="guide" class="guide"></div>
@@ -65,15 +67,13 @@ table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1p
 
 <div class="card">
  <strong>数字枠の位置合わせ</strong>
- <div class="sub">青い枠を各数字に重ねます。保存済みの枠位置は自動で呼び出します。</div>
+ <div class="sub">青い枠を各数字に重ねます。保存済みの枠位置があれば自動で呼び出します。</div>
  <div id="rectStage" style="display:none"><canvas id="rectified" width="900" height="700"></canvas></div>
- <div class="calib">
-  <button id="readBtn" disabled>読み取る</button>
-  <button id="saveCalibBtn" class="secondary" disabled>枠位置を保存</button>
-  <button id="resetBoxesBtn" class="secondary" disabled>枠を初期位置へ</button>
-  <button id="clearLearnBtn" class="danger" disabled>学習データ削除</button>
+ <div class="row" style="margin-top:10px">
+   <button id="readBtn" disabled>読み取る</button>
+   <button id="saveCalibBtn" class="secondary" disabled>枠位置を保存</button>
+   <button id="resetBoxesBtn" class="secondary" disabled>枠を初期位置へ</button>
  </div>
-
  <div id="status" class="status" style="padding-top:10px">写真を選択してください。</div>
 
  <div id="results" class="results" style="display:none">
@@ -82,12 +82,19 @@ table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1p
   <div class="result"><span>脈拍</span><b id="rPulse">—</b></div>
  </div>
 
- <div class="learnbox">
-  <strong>実機学習</strong>
-  <div class="sub">写真を見て正しい「上・下・脈拍」を手入力してから、「この写真から学習」を押します。</div>
-  <button id="learnBtn" class="secondary" disabled>この写真から学習</button>
-  <div id="learnStats" class="learnstats"></div>
+ <div id="debuggrid" class="debuggrid" style="display:none">
+  <div class="debugbox"><b>SYS 正規化</b><canvas id="dbgSys"></canvas></div>
+  <div class="debugbox"><b>DIA 正規化</b><canvas id="dbgDia"></canvas></div>
+  <div class="debugbox"><b>PULSE 正規化</b><canvas id="dbgPulse"></canvas></div>
  </div>
+</div>
+
+<div class="card">
+ <strong>実機学習</strong>
+ <div class="sub">読み取り結果が違うとき、正しい「上・下・脈拍」を手入力してから「この写真から学習」を押します。</div>
+ <button id="learnBtn" class="secondary">この写真から学習</button>
+ <button id="clearLearnBtn" class="danger">学習データ削除</button>
+ <div id="learnrow" class="learnrow"></div>
 </div>
 
 <div class="card">
@@ -115,10 +122,10 @@ table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1p
 
 <script>
 const $=id=>document.getElementById(id);
-const KEY="bp_hem7271t_v8", CALKEY="bp_hem7271t_digitboxes_v8", LEARNKEY="bp_hem7271t_learned_v8";
+const KEY="bp_hem7271t_v9", CALKEY="bp_hem7271t_digitboxes_v9", LEARNKEY="bp_hem7271t_learning_v9";
 $("date").value=new Date().toISOString().slice(0,10);
 
-let src=null,pts=[],boxes=[],currentExtracts=[];
+let src=null,pts=[],boxes=[],lastFeatures=[];
 const pc=$("photoCanvas"),pctx=pc.getContext("2d",{willReadFrequently:true}),stage=$("stage");
 const rc=$("rectified"),rctx=rc.getContext("2d",{willReadFrequently:true}),rectStage=$("rectStage");
 const handles=[...document.querySelectorAll(".handle")];
@@ -133,17 +140,13 @@ const DEFAULT_BOXES=[
  {id:"p2",label:"P2",group:"pulse",x:.61,y:.69,w:.11,h:.18}
 ];
 
+// canonical 7-seg patterns: a,b,c,d,e,f,g
+const SEG_PATTERNS={
+ 0:"1111110",1:"0110000",2:"1101101",3:"1111001",4:"0110011",
+ 5:"1011011",6:"1011111",7:"1110000",8:"1111111",9:"1111011"
+};
+
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
-function loadLearned(){try{return JSON.parse(localStorage.getItem(LEARNKEY)||"{}")}catch{return{}}}
-function saveLearned(x){localStorage.setItem(LEARNKEY,JSON.stringify(x));renderLearnStats()}
-function renderLearnStats(){
- const d=loadLearned();
- $("learnStats").innerHTML=Array.from({length:10},(_,n)=>{
-   const c=(d[n]||[]).length;
-   return `<span class="chip ${c?"ok":""}">${n}: ${c}枚</span>`;
- }).join("");
-}
-renderLearnStats();
 
 $("photo").onchange=async e=>{
  const f=e.target.files?.[0];if(!f)return;
@@ -154,7 +157,7 @@ $("photo").onchange=async e=>{
  stage.style.display="block";
  pts=[{x:pc.width*.29,y:pc.height*.20},{x:pc.width*.79,y:pc.height*.20},{x:pc.width*.79,y:pc.height*.66},{x:pc.width*.29,y:pc.height*.66}];
  positionHandles();$("rectifyBtn").disabled=false;
- $("status").textContent="4つの丸をLCD面の四隅へ合わせてください。";
+ $("status").textContent="4つの丸をLCD面の四隅に合わせてください。";
 };
 
 function positionHandles(){
@@ -164,20 +167,20 @@ function positionHandles(){
  g.style.left=Math.min(...xs)+"px";g.style.top=Math.min(...ys)+"px";
  g.style.width=(Math.max(...xs)-Math.min(...xs))+"px";g.style.height=(Math.max(...ys)-Math.min(...ys))+"px";
 }
+window.addEventListener("resize",()=>{positionHandles();positionBoxes()});
 handles.forEach(h=>{
  const i=Number(h.dataset.i);
  h.onpointerdown=e=>{
-  e.preventDefault();h.setPointerCapture(e.pointerId);
-  h.onpointermove=ev=>{
-   const r=pc.getBoundingClientRect();
-   pts[i].x=Math.max(0,Math.min(pc.width,(ev.clientX-r.left)*pc.width/r.width));
-   pts[i].y=Math.max(0,Math.min(pc.height,(ev.clientY-r.top)*pc.height/r.height));
-   positionHandles();
-  };
-  h.onpointerup=()=>h.onpointermove=null;
+   e.preventDefault();h.setPointerCapture(e.pointerId);
+   h.onpointermove=ev=>{
+     const r=pc.getBoundingClientRect();
+     pts[i].x=Math.max(0,Math.min(pc.width,(ev.clientX-r.left)*pc.width/r.width));
+     pts[i].y=Math.max(0,Math.min(pc.height,(ev.clientY-r.top)*pc.height/r.height));
+     positionHandles();
+   };
+   h.onpointerup=()=>h.onpointermove=null;
  };
 });
-window.addEventListener("resize",()=>{positionHandles();positionBoxes()});
 
 function rectify(){
  const ow=rc.width,oh=rc.height,[tl,tr,br,bl]=pts;
@@ -196,7 +199,7 @@ function rectify(){
  rctx.putImageData(dst,0,0);rectStage.style.display="block";
  try{boxes=JSON.parse(localStorage.getItem(CALKEY)||"null")||structuredClone(DEFAULT_BOXES)}catch{boxes=structuredClone(DEFAULT_BOXES)}
  makeBoxes();positionBoxes();
- ["readBtn","saveCalibBtn","resetBoxesBtn","learnBtn","clearLearnBtn"].forEach(id=>$(id).disabled=false);
+ ["readBtn","saveCalibBtn","resetBoxesBtn"].forEach(id=>$(id).disabled=false);
  $("status").textContent="青い枠を各数字に合わせてください。";
 }
 $("rectifyBtn").onclick=rectify;
@@ -204,146 +207,209 @@ $("rectifyBtn").onclick=rectify;
 function makeBoxes(){
  [...rectStage.querySelectorAll(".digitbox")].forEach(x=>x.remove());
  boxes.forEach((b,i)=>{
-  const d=document.createElement("div");d.className="digitbox";d.dataset.i=i;
-  const s=document.createElement("span");s.textContent=b.label;d.appendChild(s);rectStage.appendChild(d);
-  d.onpointerdown=e=>{
-   e.preventDefault();d.setPointerCapture(e.pointerId);
-   [...rectStage.querySelectorAll(".digitbox")].forEach(x=>x.classList.remove("selected"));d.classList.add("selected");
-   const startX=e.clientX,startY=e.clientY,start={x:b.x,y:b.y};
-   d.onpointermove=ev=>{
-    const r=rc.getBoundingClientRect();
-    b.x=Math.max(0,Math.min(1-b.w,start.x+(ev.clientX-startX)/r.width));
-    b.y=Math.max(0,Math.min(1-b.h,start.y+(ev.clientY-startY)/r.height));
-    positionBoxes();
+   const d=document.createElement("div");d.className="digitbox";d.dataset.i=i;
+   const s=document.createElement("span");s.textContent=b.label;d.appendChild(s);rectStage.appendChild(d);
+   d.onpointerdown=e=>{
+     e.preventDefault();d.setPointerCapture(e.pointerId);
+     [...rectStage.querySelectorAll(".digitbox")].forEach(x=>x.classList.remove("selected"));d.classList.add("selected");
+     const sx=e.clientX,sy=e.clientY,start={x:b.x,y:b.y},r=rc.getBoundingClientRect();
+     d.onpointermove=ev=>{
+       b.x=Math.max(0,Math.min(1-b.w,start.x+(ev.clientX-sx)/r.width));
+       b.y=Math.max(0,Math.min(1-b.h,start.y+(ev.clientY-sy)/r.height));
+       positionBoxes();
+     };
+     d.onpointerup=()=>d.onpointermove=null;
    };
-   d.onpointerup=()=>d.onpointermove=null;
-  };
  });
 }
 function positionBoxes(){
  const r=rc.getBoundingClientRect();
  [...rectStage.querySelectorAll(".digitbox")].forEach(d=>{
-  const b=boxes[Number(d.dataset.i)];
-  d.style.left=(b.x*r.width)+"px";d.style.top=(b.y*r.height)+"px";
-  d.style.width=(b.w*r.width)+"px";d.style.height=(b.h*r.height)+"px";
+   const b=boxes[Number(d.dataset.i)];
+   d.style.left=(b.x*r.width)+"px";d.style.top=(b.y*r.height)+"px";
+   d.style.width=(b.w*r.width)+"px";d.style.height=(b.h*r.height)+"px";
  });
 }
 $("saveCalibBtn").onclick=()=>{localStorage.setItem(CALKEY,JSON.stringify(boxes));$("status").textContent="数字枠の位置を保存しました。"};
-$("resetBoxesBtn").onclick=()=>{boxes=structuredClone(DEFAULT_BOXES);makeBoxes();positionBoxes();$("status").textContent="初期位置へ戻しました。";};
-$("clearLearnBtn").onclick=()=>{if(confirm("実機学習データをすべて削除しますか？")){localStorage.removeItem(LEARNKEY);renderLearnStats();$("status").textContent="学習データを削除しました。";}};
+$("resetBoxesBtn").onclick=()=>{boxes=structuredClone(DEFAULT_BOXES);makeBoxes();positionBoxes();$("status").textContent="数字枠を初期位置へ戻しました。"};
 
-function extractDigit(box){
- const x=Math.round(box.x*rc.width),y=Math.round(box.y*rc.height),w=Math.round(box.w*rc.width),h=Math.round(box.h*rc.height);
- const img=rctx.getImageData(x,y,w,h);
- const gray=new Float32Array(w*h);let vals=[];
- for(let j=0;j<h;j++)for(let i=0;i<w;i++){
-  const k=(j*w+i)*4,g=.299*img.data[k]+.587*img.data[k+1]+.114*img.data[k+2];
-  gray[j*w+i]=g;vals.push(g);
+function cropBox(b){
+ const x=Math.max(0,Math.round(b.x*rc.width)),y=Math.max(0,Math.round(b.y*rc.height));
+ const w=Math.max(2,Math.round(b.w*rc.width)),h=Math.max(2,Math.round(b.h*rc.height));
+ const c=document.createElement("canvas");c.width=w;c.height=h;
+ c.getContext("2d").drawImage(rc,x,y,w,h,0,0,w,h);
+ return c;
+}
+
+// suppress moire by downscaling before thresholding
+function denoiseAndBinarize(c){
+ const small=document.createElement("canvas");
+ const targetW=70,targetH=120;
+ small.width=targetW;small.height=targetH;
+ const sctx=small.getContext("2d",{willReadFrequently:true});
+ sctx.imageSmoothingEnabled=true;sctx.imageSmoothingQuality="high";
+ sctx.drawImage(c,0,0,targetW,targetH);
+
+ const im=sctx.getImageData(0,0,targetW,targetH),d=im.data;
+ let gr=[];for(let i=0;i<d.length;i+=4)gr.push(.299*d[i]+.587*d[i+1]+.114*d[i+2]);
+ let sorted=[...gr].sort((a,b)=>a-b);
+ const q=p=>sorted[Math.min(sorted.length-1,Math.floor(sorted.length*p))];
+ // threshold biased towards dark LCD segments
+ const th=q(.33)*.55+q(.72)*.45;
+ for(let i=0,j=0;i<d.length;i+=4,j++){
+   const v=gr[j]<th?0:255;d[i]=d[i+1]=d[i+2]=v;d[i+3]=255;
  }
- vals.sort((a,b)=>a-b);const q=p=>vals[Math.min(vals.length-1,Math.floor(vals.length*p))];
- const thr=(q(.15)+q(.55))/2;
- let mask=new Uint8Array(w*h);
- for(let i=0;i<mask.length;i++)mask[i]=gray[i]<thr?1:0;
+ sctx.putImageData(im,0,0);
+ return small;
+}
 
- const col=new Int32Array(w),row=new Int32Array(h);
- for(let yy=0;yy<h;yy++)for(let xx=0;xx<w;xx++)if(mask[yy*w+xx]){col[xx]++;row[yy]++}
+// Find bounding box of connected-ish dark mass by row/column occupancy.
+// This trims whitespace and reduces sensitivity to initial digit-box size.
+function autoTrim(bin){
+ const ctx=bin.getContext("2d",{willReadFrequently:true}),w=bin.width,h=bin.height,d=ctx.getImageData(0,0,w,h).data;
+ const cols=Array(w).fill(0),rows=Array(h).fill(0);
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+   const i=(y*w+x)*4;if(d[i]<128){cols[x]++;rows[y]++}
+ }
+ const cx=cols.map(v=>v/h),ry=rows.map(v=>v/w);
  let xs=[],ys=[];
- for(let xx=0;xx<w;xx++)if(col[xx]>=Math.max(2,h*.035))xs.push(xx);
- for(let yy=0;yy<h;yy++)if(row[yy]>=Math.max(2,w*.035))ys.push(yy);
- if(!xs.length||!ys.length)return null;
-
- let minx=Math.max(0,Math.min(...xs)-2),maxx=Math.min(w-1,Math.max(...xs)+2);
- let miny=Math.max(0,Math.min(...ys)-2),maxy=Math.min(h-1,Math.max(...ys)+2);
- if((maxx-minx+1)>.95*w){minx=Math.round(.05*w);maxx=Math.round(.95*w)}
- if((maxy-miny+1)>.95*h){miny=Math.round(.03*h);maxy=Math.round(.97*h)}
-
- const cw=maxx-minx+1,ch=maxy-miny+1,OUTW=60,OUTH=100,out=new Uint8Array(OUTW*OUTH);
- for(let oy=0;oy<OUTH;oy++)for(let ox=0;ox<OUTW;ox++){
-  const sx=minx+Math.floor(ox*cw/OUTW),sy=miny+Math.floor(oy*ch/OUTH);
-  out[oy*OUTW+ox]=mask[sy*w+sx];
- }
- return {mask:Array.from(out),w:OUTW,h:OUTH};
+ cx.forEach((v,i)=>{if(v>.04)xs.push(i)});ry.forEach((v,i)=>{if(v>.025)ys.push(i)});
+ if(!xs.length||!ys.length)return bin;
+ let x1=Math.max(0,Math.min(...xs)-2),x2=Math.min(w-1,Math.max(...xs)+2);
+ let y1=Math.max(0,Math.min(...ys)-2),y2=Math.min(h-1,Math.max(...ys)+2);
+ // avoid absurdly tiny trims
+ if(x2-x1<w*.20||y2-y1<h*.25)return bin;
+ const out=document.createElement("canvas");out.width=60;out.height=110;
+ out.getContext("2d").drawImage(bin,x1,y1,x2-x1+1,y2-y1+1,0,0,out.width,out.height);
+ return out;
 }
 
-function similarity(a,b){
- if(!a||!b||a.length!==b.length)return 0;
- let inter=0,union=0;
- for(let i=0;i<a.length;i++){
-  if(a[i]||b[i])union++;
-  if(a[i]&&b[i])inter++;
+// feature vector: coarse 12x22 occupancy + row/col profiles + 7-seg zone occupancy
+function features(norm){
+ const ctx=norm.getContext("2d",{willReadFrequently:true}),w=norm.width,h=norm.height,d=ctx.getImageData(0,0,w,h).data;
+ const dark=(x,y)=>d[(y*w+x)*4]<128?1:0;
+ let vec=[];
+ const gx=12,gy=22;
+ for(let yy=0;yy<gy;yy++)for(let xx=0;xx<gx;xx++){
+   let s=0,n=0,x1=Math.floor(xx*w/gx),x2=Math.floor((xx+1)*w/gx),y1=Math.floor(yy*h/gy),y2=Math.floor((yy+1)*h/gy);
+   for(let y=y1;y<y2;y++)for(let x=x1;x<x2;x++){s+=dark(x,y);n++}
+   vec.push(n?s/n:0);
  }
- return union?inter/union:0;
+ // column + row projections
+ for(let xx=0;xx<12;xx++){let s=0,n=0,x1=Math.floor(xx*w/12),x2=Math.floor((xx+1)*w/12);for(let y=0;y<h;y++)for(let x=x1;x<x2;x++){s+=dark(x,y);n++}vec.push(s/n)}
+ for(let yy=0;yy<18;yy++){let s=0,n=0,y1=Math.floor(yy*h/18),y2=Math.floor((yy+1)*h/18);for(let y=y1;y<y2;y++)for(let x=0;x<w;x++){s+=dark(x,y);n++}vec.push(s/n)}
+ // 7 segment occupancies
+ const zones=[[.20,.02,.80,.18],[.70,.10,.98,.48],[.70,.52,.98,.90],[.20,.82,.80,.99],[.02,.52,.30,.90],[.02,.10,.30,.48],[.20,.42,.80,.60]];
+ zones.forEach(([a,b,c,e])=>{
+   let s=0,n=0;for(let y=Math.floor(b*h);y<Math.floor(e*h);y++)for(let x=Math.floor(a*w);x<Math.floor(c*w);x++){s+=dark(x,y);n++}vec.push(s/n)
+ });
+ return vec;
+}
+function cosine(a,b){
+ let ab=0,aa=0,bb=0;for(let i=0;i<a.length;i++){ab+=a[i]*b[i];aa+=a[i]*a[i];bb+=b[i]*b[i]}
+ return aa&&bb?ab/Math.sqrt(aa*bb):0;
+}
+function segScore(vec,digit){
+ const seg=vec.slice(-7),pat=SEG_PATTERNS[digit];
+ let err=0;
+ for(let i=0;i<7;i++){
+   const target=pat[i]==="1"?.55:.12;
+   err+=Math.abs(seg[i]-target);
+ }
+ return Math.max(0,1-err/7);
+}
+function getLearn(){try{return JSON.parse(localStorage.getItem(LEARNKEY)||"{}")}catch{return{}}}
+function saveLearn(v){localStorage.setItem(LEARNKEY,JSON.stringify(v));renderLearn()}
+
+function classify(feat){
+ const learned=getLearn(),scores=[];
+ for(let digit=0;digit<=9;digit++){
+   const arr=learned[digit]||[];
+   let learnedScore=0;
+   if(arr.length)learnedScore=Math.max(...arr.map(v=>cosine(feat,v)));
+   const shapeScore=segScore(feat,digit);
+   // learned templates dominate when available, but shape acts as regularizer
+   let score=arr.length ? .78*learnedScore+.22*shapeScore : .35*shapeScore;
+   scores.push({digit,score,learned:arr.length>0});
+ }
+ scores.sort((a,b)=>b.score-a.score);
+ return scores.slice(0,4);
 }
 
-function genericTemplates(){
- // Simple seven-segment raster fallback.
- const segs={
-  0:[1,1,1,1,1,1,0],1:[0,1,1,0,0,0,0],2:[1,1,0,1,1,0,1],3:[1,1,1,1,0,0,1],4:[0,1,1,0,0,1,1],
-  5:[1,0,1,1,0,1,1],6:[1,0,1,1,1,1,1],7:[1,1,1,0,0,0,0],8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
- };
- function make(bits){
-  const W=60,H=100,m=new Uint8Array(W*H);
-  const fill=(x1,y1,x2,y2)=>{for(let y=Math.floor(y1*H);y<Math.ceil(y2*H);y++)for(let x=Math.floor(x1*W);x<Math.ceil(x2*W);x++)m[y*W+x]=1}
-  if(bits[0])fill(.2,.03,.8,.10);if(bits[1])fill(.78,.08,.9,.48);if(bits[2])fill(.78,.52,.9,.92);
-  if(bits[3])fill(.2,.90,.8,.97);if(bits[4])fill(.1,.52,.22,.92);if(bits[5])fill(.1,.08,.22,.48);if(bits[6])fill(.2,.46,.8,.54);
-  return Array.from(m);
- }
- return Object.fromEntries(Object.entries(segs).map(([n,b])=>[n,make(b)]));
-}
-const GENERIC=genericTemplates();
-
-function classify(ex){
- if(!ex)return {n:null,score:0,src:"none"};
- const learned=loadLearned();
- let best={n:null,score:-1,src:""};
- for(let n=0;n<=9;n++){
-  let samples=learned[n]||[];
-  for(const s of samples){
-    const sc=similarity(ex.mask,s);
-    if(sc>best.score)best={n,score:sc,src:"learned"};
-  }
-  const g=similarity(ex.mask,GENERIC[n]);
-  if(g>best.score)best={n,score:g,src:"generic"};
- }
- return best.score>.18?best:{n:null,score:best.score,src:best.src};
+function processBox(b){
+ const raw=cropBox(b),bin=denoiseAndBinarize(raw),norm=autoTrim(bin),feat=features(norm);
+ return {norm,feat,cands:classify(feat),box:b};
 }
 
-function runExtract(){
- currentExtracts=boxes.map(b=>({box:b,ex:extractDigit(b)}));
- return currentExtracts;
+function combineCandidates(parts,group){
+ let combos=[{digits:"",score:0,details:[]}];
+ parts.forEach(p=>{
+   let next=[];
+   p.cands.slice(0,3).forEach(c=>combos.forEach(base=>{
+     next.push({digits:base.digits+c.digit,score:base.score+Math.log(Math.max(c.score,.0001)),details:[...base.details,c]})
+   }));
+   combos=next.sort((a,b)=>b.score-a.score).slice(0,30);
+ });
+ return combos.map(c=>({...c,value:Number(c.digits)})).filter(c=>{
+   if(group==="sys")return c.value>=70&&c.value<=250;
+   if(group==="dia")return c.value>=35&&c.value<=150;
+   return c.value>=35&&c.value<=200;
+ });
+}
+
+function drawDebug(processed){
+ const groups={sys:[],dia:[],pulse:[]};processed.forEach(p=>groups[p.box.group].push(p));
+ for(const [g,id] of [["sys","dbgSys"],["dia","dbgDia"],["pulse","dbgPulse"]]){
+   const c=$(id),ctx=c.getContext("2d");c.width=300;c.height=150;ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);
+   groups[g].forEach((p,i)=>ctx.drawImage(p.norm,i*95+5,10,85,130));
+ }
+ $("debuggrid").style.display="grid";
 }
 
 $("readBtn").onclick=()=>{
- const xs=runExtract().map(o=>({...o,cl:classify(o.ex)}));
- const groups=g=>xs.filter(o=>o.box.group===g);
- const val=g=>{const a=groups(g);return a.every(o=>o.cl.n!==null)?Number(a.map(o=>o.cl.n).join("")):null};
- const sys=val("sys"),dia=val("dia"),pulse=val("pulse");
- $("results").style.display="grid";$("rSys").textContent=sys??"?";$("rDia").textContent=dia??"?";$("rPulse").textContent=pulse??"?";
- if(sys>=70&&sys<=250)$("sys").value=sys;if(dia>=35&&dia<=150)$("dia").value=dia;if(pulse>=35&&pulse<=200)$("pulse").value=pulse;
- const fmt=g=>groups(g).map(o=>`${o.box.label}=${o.cl.n??"?"}(${o.cl.score.toFixed(2)},${o.cl.src})`).join(" / ");
- $("status").textContent=`${fmt("sys")} | ${fmt("dia")} | ${fmt("pulse")}`;
+ const processed=boxes.map(processBox);lastFeatures=processed.map(p=>p.feat);
+ drawDebug(processed);
+ const gs={sys:processed.filter(p=>p.box.group==="sys"),dia:processed.filter(p=>p.box.group==="dia"),pulse:processed.filter(p=>p.box.group==="pulse")};
+ let S=combineCandidates(gs.sys,"sys"),D=combineCandidates(gs.dia,"dia"),P=combineCandidates(gs.pulse,"pulse");
+ let best=null;
+ for(const s of S.slice(0,10))for(const d of D.slice(0,10))for(const p of P.slice(0,10)){
+   if(s.value<=d.value)continue;
+   // soft physiological plausibility; don't over-constrain
+   let score=s.score+d.score+p.score;
+   if(s.value-d.value>=20&&s.value-d.value<=100)score+=.15;
+   if(d.value>=45&&d.value<=110)score+=.05;
+   if(p.value>=45&&p.value<=130)score+=.05;
+   if(!best||score>best.score)best={s,d,p,score};
+ }
+ $("results").style.display="grid";
+ if(best){
+   $("rSys").textContent=best.s.value;$("rDia").textContent=best.d.value;$("rPulse").textContent=best.p.value;
+   $("sys").value=best.s.value;$("dia").value=best.d.value;$("pulse").value=best.p.value;
+   const fmt=(part)=>part.details.map(x=>`${x.digit}(${x.score.toFixed(2)},${x.learned?"learned":"shape"})`).join(",");
+   $("status").textContent=`候補: ${best.s.value}/${best.d.value} 脈拍${best.p.value} | SYS ${fmt(best.s)} | DIA ${fmt(best.d)} | PULSE ${fmt(best.p)}`;
+ }else{
+   $("rSys").textContent=$("rDia").textContent=$("rPulse").textContent="?";
+   $("status").textContent="血圧として整合する候補を作れませんでした。枠位置を確認してください。";
+ }
 };
 
 $("learnBtn").onclick=()=>{
- const sys=String($("sys").value||""),dia=String($("dia").value||""),pulse=String($("pulse").value||"");
+ if(lastFeatures.length!==boxes.length){alert("先に「読み取る」を押してください。");return}
+ const sys=String(Number($("sys").value)),dia=String(Number($("dia").value)),pulse=String(Number($("pulse").value));
  if(sys.length!==3||dia.length!==2||pulse.length!==2){alert("正しい上3桁・下2桁・脈拍2桁を入力してください。");return}
- const exs=runExtract();
- if(exs.some(x=>!x.ex)){alert("数字抽出に失敗している枠があります。枠位置を確認してください。");return}
- const truth=(sys+dia+pulse).split("").map(Number),learned=loadLearned();
- exs.forEach((o,i)=>{
-  const n=truth[i];
-  learned[n]=learned[n]||[];
-  learned[n].push(o.ex.mask);
-  if(learned[n].length>20)learned[n]=learned[n].slice(-20);
- });
- saveLearned(learned);
- $("status").textContent=`学習しました：${sys} / ${dia} / ${pulse}。同じ実機の次回写真から優先して照合します。`;
+ const truth=(sys+dia+pulse).split("").map(Number),learn=getLearn();
+ truth.forEach((digit,i)=>{if(!learn[digit])learn[digit]=[];learn[digit].push(lastFeatures[i]);if(learn[digit].length>30)learn[digit]=learn[digit].slice(-30)});
+ saveLearn(learn);$("status").textContent=`この写真を ${sys}/${dia} 脈拍${pulse} として学習しました。`;
 };
+$("clearLearnBtn").onclick=()=>{if(confirm("学習データをすべて削除しますか？")){localStorage.removeItem(LEARNKEY);renderLearn()}};
+
+function renderLearn(){
+ const l=getLearn();$("learnrow").innerHTML=Array.from({length:10},(_,i)=>`<div class="learnchip">${i}: ${(l[i]||[]).length}枚</div>`).join("")
+}
 
 function load(){try{return JSON.parse(localStorage.getItem(KEY)||"[]")}catch{return[]}}
 function persist(r){localStorage.setItem(KEY,JSON.stringify(r))}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-
 $("saveBtn").onclick=()=>{
  const sys=Number($("sys").value),dia=Number($("dia").value),pulse=Number($("pulse").value||0);
  if(!sys||!dia||sys<=dia){alert("血圧の数値を確認してください。");return}
@@ -351,25 +417,20 @@ $("saveBtn").onclick=()=>{
  const r=load();r.push({id:crypto.randomUUID?crypto.randomUUID():String(Date.now()),date:$("date").value,sys,dia,pulse:pulse||null,memo:$("memo").value.trim()});persist(r);render();
 };
 window.delRec=id=>{persist(load().filter(r=>r.id!==id));render()};
-
 function render(){
- const r=load().sort((a,b)=>a.date.localeCompare(b.date));
- $("count").textContent=r.length;$("latest").textContent=r.length?`${r.at(-1).sys}/${r.at(-1).dia}`:"—";
+ const r=load().sort((a,b)=>a.date.localeCompare(b.date));$("count").textContent=r.length;$("latest").textContent=r.length?`${r.at(-1).sys}/${r.at(-1).dia}`:"—";
  $("avg").textContent=r.length?`${(r.reduce((s,x)=>s+x.sys,0)/r.length).toFixed(0)}/${(r.reduce((s,x)=>s+x.dia,0)/r.length).toFixed(0)}`:"—";
- $("history").innerHTML=r.length?`<table><thead><tr><th>日付</th><th>血圧</th><th>脈拍</th><th>メモ</th><th></th></tr></thead><tbody>${[...r].reverse().map(x=>`<tr><td>${esc(x.date)}</td><td>${x.sys}/${x.dia}</td><td>${x.pulse??"—"}</td><td>${esc(x.memo)}</td><td><button class="danger" onclick="delRec('${x.id}')">削除</button></td></tr>`).join("")}</tbody></table>`:`<div class="status">まだ記録がありません。</div>`;
- draw(r);
+ $("history").innerHTML=r.length?`<table><thead><tr><th>日付</th><th>血圧</th><th>脈拍</th><th>メモ</th><th></th></tr></thead><tbody>${[...r].reverse().map(x=>`<tr><td>${esc(x.date)}</td><td>${x.sys}/${x.dia}</td><td>${x.pulse??"—"}</td><td>${esc(x.memo)}</td><td><button class="danger" onclick="delRec('${x.id}')">削除</button></td></tr>`).join("")}</tbody></table>`:`<div class="status">まだ記録がありません。</div>`;draw(r)
 }
 function draw(r){
- const svg=$("chart"),W=700,H=230,p=30;
- if(!r.length){svg.innerHTML=`<text x="350" y="115" text-anchor="middle" fill="#9ca3af">記録するとグラフが表示されます</text>`;return}
- const vals=r.flatMap(x=>[x.sys,x.dia]),min=Math.min(...vals)-10,max=Math.max(...vals)+10;
- const x=i=>p+(r.length===1?(W-2*p)/2:i*(W-2*p)/(r.length-1)),y=v=>H-p-(v-min)*(H-2*p)/(max-min),pts=f=>r.map((a,i)=>`${x(i)},${y(a[f])}`).join(" ");
- svg.innerHTML=`<polyline points="${pts("sys")}" fill="none" stroke="#111827" stroke-width="3"/><polyline points="${pts("dia")}" fill="none" stroke="#6b7280" stroke-width="3"/>`;
+ const svg=$("chart"),W=700,H=230,p=30;if(!r.length){svg.innerHTML=`<text x="350" y="115" text-anchor="middle" fill="#9ca3af">記録するとグラフが表示されます</text>`;return}
+ const vals=r.flatMap(x=>[x.sys,x.dia]),min=Math.min(...vals)-10,max=Math.max(...vals)+10,x=i=>p+(r.length===1?(W-2*p)/2:i*(W-2*p)/(r.length-1)),y=v=>H-p-(v-min)*(H-2*p)/(max-min),pts=f=>r.map((a,i)=>`${x(i)},${y(a[f])}`).join(" ");
+ svg.innerHTML=`<polyline points="${pts("sys")}" fill="none" stroke="#111827" stroke-width="3"/><polyline points="${pts("dia")}" fill="none" stroke="#6b7280" stroke-width="3"/>`
 }
 $("clearBtn").onclick=()=>{if(confirm("全記録を削除しますか？")){localStorage.removeItem(KEY);render()}};
 $("csvBtn").onclick=()=>{const r=load(),rows=[["date","systolic","diastolic","pulse","memo"],...r.map(x=>[x.date,x.sys,x.dia,x.pulse??"",x.memo||""])],csv=rows.map(row=>row.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv"}));a.download="blood_pressure.csv";a.click()};
+
+render();renderLearn();
 if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
-render();
 </script>
-</body>
-</html>
+</body></html>
