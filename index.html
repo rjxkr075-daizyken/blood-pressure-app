@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v14</title>
+<title>HEM-7271T 血圧フォト記録 v15</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
@@ -41,8 +41,8 @@ svg{width:100%;height:230px;display:block}
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v14</h1>
-<div class="sub">LCD四隅だけ指定 → 3行抽出 → 桁境界を自動検出</div>
+<h1>HEM-7271T 血圧フォト記録 v15</h1>
+<div class="sub">HEM-7271T専用固定レイアウト + 各桁内だけ微調整</div>
 
 <div class="card">
  <div class="row">
@@ -59,12 +59,12 @@ svg{width:100%;height:230px;display:block}
   <div class="handle" data-i="0"></div><div class="handle" data-i="1"></div>
   <div class="handle" data-i="2"></div><div class="handle" data-i="3"></div>
  </div>
- <div class="notice">4つの丸をLCD面の四隅へ合わせてください。V14では数字ごとの青枠調整は不要です。</div>
+ <div class="notice">4つの丸をLCD面の四隅へ合わせてください。V15ではLCD四隅だけ合わせれば、各桁位置はHEM-7271T専用座標を使います。</div>
 </div>
 
 <div class="card">
  <div class="row">
-  <button id="readBtn" disabled>3行を自動解析</button>
+  <button id="readBtn" disabled>HEM-7271T専用解析</button>
  </div>
  <canvas id="rectified" width="900" height="700" style="display:none;margin-top:12px"></canvas>
  <div id="status" class="status" style="padding-top:10px">写真を選択してください。</div>
@@ -76,9 +76,9 @@ svg{width:100%;height:230px;display:block}
  </div>
 
  <div id="rowdebug" class="rowdebug" style="display:none">
-  <div class="rowbox"><b>SYS 行</b><canvas id="dbgSys"></canvas></div>
-  <div class="rowbox"><b>DIA 行</b><canvas id="dbgDia"></canvas></div>
-  <div class="rowbox"><b>PULSE 行</b><canvas id="dbgPulse"></canvas></div>
+  <div class="rowbox"><b>SYS 固定桁</b><canvas id="dbgSys"></canvas></div>
+  <div class="rowbox"><b>DIA 固定桁</b><canvas id="dbgDia"></canvas></div>
+  <div class="rowbox"><b>PULSE 固定桁</b><canvas id="dbgPulse"></canvas></div>
  </div>
  <div id="debug" class="debug" style="display:none"></div>
 </div>
@@ -122,11 +122,21 @@ const PAT={
  8:[1,1,1,1,1,1,1],9:[1,1,1,1,0,1,1]
 };
 
-// Normalized LCD row regions, deliberately broad.
-const ROWS={
- sys:{x:.12,y:.16,w:.62,h:.29,digits:3},
- dia:{x:.20,y:.43,w:.52,h:.27,digits:2},
- pulse:{x:.37,y:.70,w:.36,h:.19,digits:2}
+// HEM-7271T専用の固定桁位置（LCD補正後の900x700座標比）
+const DIGIT_BOXES={
+ sys:[
+  {x:.19,y:.19,w:.12,h:.30},
+  {x:.32,y:.19,w:.17,h:.30},
+  {x:.53,y:.19,w:.10,h:.30}
+ ],
+ dia:[
+  {x:.34,y:.43,w:.14,h:.27},
+  {x:.53,y:.43,w:.10,h:.27}
+ ],
+ pulse:[
+  {x:.42,y:.69,w:.12,h:.18},
+  {x:.55,y:.69,w:.12,h:.18}
+ ]
 };
 
 function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
@@ -182,14 +192,19 @@ function rectify(){
   }
  }
  rctx.putImageData(dst,0,0);rc.style.display="block";$("readBtn").disabled=false;
- $("status").textContent="液晶を補正しました。「3行を自動解析」を押してください。";
+ $("status").textContent="液晶を補正しました。「HEM-7271T専用解析」を押してください。";
 }
 $("rectifyBtn").onclick=rectify;
 
-function cropRow(def){
+
+function cropFixedDigit(box){
+ const x=Math.max(0,Math.round(rc.width*box.x));
+ const y=Math.max(0,Math.round(rc.height*box.y));
+ const w=Math.max(20,Math.round(rc.width*box.w));
+ const h=Math.max(20,Math.round(rc.height*box.h));
  const c=document.createElement("canvas");
- c.width=Math.round(rc.width*def.w);c.height=Math.round(rc.height*def.h);
- c.getContext("2d").drawImage(rc,rc.width*def.x,rc.height*def.y,rc.width*def.w,rc.height*def.h,0,0,c.width,c.height);
+ c.width=w;c.height=h;
+ c.getContext("2d").drawImage(rc,x,y,w,h,0,0,w,h);
  return c;
 }
 
@@ -227,53 +242,47 @@ function diffFor(c){
  return {diff,w,h};
 }
 
-function splitDigits(rowCanvas,count){
- const {diff,w,h}=diffFor(rowCanvas);
- const col=new Float32Array(w);
- for(let x=0;x<w;x++){
-  let s=0;
-  for(let y=0;y<h;y++)s+=diff[y*w+x];
-  col[x]=s/h;
- }
- // smooth projection
- const sm=new Float32Array(w);
- for(let x=0;x<w;x++){
-  let s=0,n=0;
-  for(let k=-4;k<=4;k++){let j=x+k;if(j>=0&&j<w){s+=col[j];n++}}
-  sm[x]=s/n;
- }
- // find low-energy gaps away from edges
- let gaps=[];
- for(let x=Math.floor(w*.08);x<Math.floor(w*.92);x++){
-  if(sm[x]<=sm[x-1]&&sm[x]<=sm[x+1])gaps.push({x,v:sm[x]});
- }
- gaps.sort((a,b)=>a.v-b.v);
+// 固定枠内だけで、数字本体の中心を小さく探索する。
+// 探索量を制限して、隣の桁へ飛びつかないようにする。
+function refineDigitCrop(c){
+ const {diff,w,h}=diffFor(c);
+ let best={score:-1,x1:0,y1:0,x2:w,y2:h};
+ const shifts=[-.10,-.05,0,.05,.10];
+ const scales=[.82,.90,.98];
 
- const need=count-1, chosen=[];
- for(const g of gaps){
-  if(chosen.every(x=>Math.abs(x-g.x)>w*.12)){chosen.push(g.x);if(chosen.length===need)break}
+ for(const sx of shifts) for(const sy of shifts) for(const sc of scales){
+   const bw=Math.max(10,Math.round(w*sc));
+   const bh=Math.max(10,Math.round(h*sc));
+   let x1=Math.round((w-bw)/2 + sx*w);
+   let y1=Math.round((h-bh)/2 + sy*h);
+   x1=Math.max(0,Math.min(w-bw,x1));
+   y1=Math.max(0,Math.min(h-bh,y1));
+   const x2=x1+bw,y2=y1+bh;
+   let s=0,n=0;
+   for(let y=y1;y<y2;y++){
+     for(let x=x1;x<x2;x++){
+       s+=diff[y*w+x];n++;
+     }
+   }
+   const score=n?s/n:0;
+   if(score>best.score)best={score,x1,y1,x2,y2};
  }
- if(chosen.length<need){
-  chosen=[];
-  for(let i=1;i<count;i++)chosen.push(Math.round(w*i/count));
- }
- chosen.sort((a,b)=>a-b);
 
- const cuts=[0,...chosen,w],digits=[];
- for(let i=0;i<count;i++){
-  let x1=cuts[i],x2=cuts[i+1];
-  const pad=Math.round((x2-x1)*.06);
-  x1=Math.max(0,x1+pad);x2=Math.min(w,x2-pad);
-  const c=document.createElement("canvas");c.width=Math.max(10,x2-x1);c.height=h;
-  c.getContext("2d").drawImage(rowCanvas,x1,0,x2-x1,h,0,0,c.width,h);
-  digits.push(c);
- }
- return {digits,cuts,projection:sm};
+ const out=document.createElement("canvas");
+ out.width=84;out.height=150;
+ const ctx=out.getContext("2d");
+ ctx.fillStyle="#fff";ctx.fillRect(0,0,out.width,out.height);
+ ctx.drawImage(c,best.x1,best.y1,best.x2-best.x1,best.y2-best.y1,0,0,out.width,out.height);
+ return {canvas:out,refine:best};
 }
 
 function meanRegion(diff,w,h,rect){
  const [x1,y1,x2,y2]=rect;let s=0,n=0;
- for(let y=Math.floor(y1*h);y<Math.ceil(y2*h);y++)for(let x=Math.floor(x1*w);x<Math.ceil(x2*w);x++){s+=diff[y*w+x];n++}
+ for(let y=Math.floor(y1*h);y<Math.ceil(y2*h);y++){
+  for(let x=Math.floor(x1*w);x<Math.ceil(x2*w);x++){
+   s+=diff[y*w+x];n++;
+  }
+ }
  return n?s/n:0;
 }
 const ZONES=[
@@ -281,66 +290,78 @@ const ZONES=[
  [.20,.82,.80,.98],[.04,.53,.33,.90],[.04,.10,.33,.47],[.20,.42,.80,.60]
 ];
 
-function normalizeDigit(c){
- const out=document.createElement("canvas");out.width=84;out.height=150;
- const ctx=out.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,out.width,out.height);
- const scale=Math.min(out.width/c.width,out.height/c.height);
- const dw=Math.round(c.width*scale),dh=Math.round(c.height*scale);
- ctx.drawImage(c,0,0,c.width,c.height,(out.width-dw)/2,(out.height-dh)/2,dw,dh);
- return out;
-}
-
-function classifyDigit(c){
- const normCanvas=normalizeDigit(c),{diff,w,h}=diffFor(normCanvas);
+function classifyFixedDigit(box){
+ const raw=cropFixedDigit(box);
+ const refined=refineDigitCrop(raw);
+ const {diff,w,h}=diffFor(refined.canvas);
  const vals=ZONES.map(z=>meanRegion(diff,w,h,z));
- const max=Math.max(...vals),min=Math.min(...vals),norm=vals.map(v=>max>min?(v-min)/(max-min):0);
+ const max=Math.max(...vals),min=Math.min(...vals);
+ const norm=vals.map(v=>max>min?(v-min)/(max-min):0);
 
  let cand=[];
  for(const [digit,pat] of Object.entries(PAT)){
-  let err=0;
-  for(let i=0;i<7;i++){const target=pat[i]?0.78:0.15;err+=(norm[i]-target)*(norm[i]-target)}
-  cand.push({digit:Number(digit),err});
+   let err=0;
+   for(let i=0;i<7;i++){
+     const target=pat[i]?0.78:0.15;
+     err+=(norm[i]-target)*(norm[i]-target);
+   }
+   cand.push({digit:Number(digit),err});
  }
  cand.sort((a,b)=>a.err-b.err);
  const margin=cand[1].err-cand[0].err;
  const confidence=Math.max(0,Math.min(1,margin/0.30));
- return {n:confidence>=.35?cand[0].digit:null,confidence,vals,norm};
+
+ return {
+   n:confidence>=.35?cand[0].digit:null,
+   confidence,norm,vals,
+   canvas:refined.canvas,
+   refine:refined.refine
+ };
 }
 
-function analyzeRow(def){
- const row=cropRow(def),split=splitDigits(row,def.digits);
- const rs=split.digits.map(classifyDigit);
+function analyzeFixedGroup(group){
+ const rs=DIGIT_BOXES[group].map(classifyFixedDigit);
  const value=rs.every(r=>r.n!==null)?Number(rs.map(r=>r.n).join("")):null;
- return {row,split,rs,value};
+ return {rs,value};
 }
 
-function drawRowDebug(obj,id){
- const c=$(id),ctx=c.getContext("2d");c.width=700;c.height=150;ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);
- ctx.drawImage(obj.row,0,0,c.width,c.height);
- ctx.strokeStyle="#111";ctx.lineWidth=2;
- obj.split.cuts.slice(1,-1).forEach(x=>{
-  const px=x/obj.row.width*c.width;ctx.beginPath();ctx.moveTo(px,0);ctx.lineTo(px,c.height);ctx.stroke();
+function drawFixedDebug(obj,id){
+ const c=$(id),ctx=c.getContext("2d");
+ c.width=700;c.height=150;
+ ctx.fillStyle="#fff";ctx.fillRect(0,0,c.width,c.height);
+ const n=obj.rs.length;
+ obj.rs.forEach((r,i)=>{
+   const w=120,h=140;
+   const x=20+i*180;
+   ctx.drawImage(r.canvas,x,5,w,h);
  });
 }
 
 $("readBtn").onclick=()=>{
- const S=analyzeRow(ROWS.sys),D=analyzeRow(ROWS.dia),P=analyzeRow(ROWS.pulse);
+ const S=analyzeFixedGroup("sys"),D=analyzeFixedGroup("dia"),P=analyzeFixedGroup("pulse");
  $("results").style.display="grid";$("rowdebug").style.display="grid";$("debug").style.display="block";
- drawRowDebug(S,"dbgSys");drawRowDebug(D,"dbgDia");drawRowDebug(P,"dbgPulse");
+ drawFixedDebug(S,"dbgSys");drawFixedDebug(D,"dbgDia");drawFixedDebug(P,"dbgPulse");
 
  const show=(obj,id,input,min,max)=>{
-  if(obj.value!==null&&obj.value>=min&&obj.value<=max){$(id).textContent=obj.value;$(input).value=obj.value}
-  else{$(id).textContent="?";$(input).value=""}
+  if(obj.value!==null&&obj.value>=min&&obj.value<=max){
+    $(id).textContent=obj.value;$(input).value=obj.value;
+  }else{
+    $(id).textContent="?";$(input).value="";
+  }
  };
- show(S,"rSys","sys",70,250);show(D,"rDia","dia",35,150);show(P,"rPulse","pulse",35,200);
+ show(S,"rSys","sys",70,250);
+ show(D,"rDia","dia",35,150);
+ show(P,"rPulse","pulse",35,200);
 
- const fmt=(name,obj)=>name+" "+obj.rs.map(r=>`${r.n??"?"} conf=${r.confidence.toFixed(2)} norm=${r.norm.map(v=>v.toFixed(2)).join(",")}`).join(" / ");
+ const fmt=(name,obj)=>name+" "+obj.rs.map(r=>
+   `${r.n??"?"} conf=${r.confidence.toFixed(2)} norm=${r.norm.map(v=>v.toFixed(2)).join(",")} refine=${r.refine.x1},${r.refine.y1},${r.refine.x2},${r.refine.y2}`
+ ).join(" / ");
  $("debug").textContent=fmt("SYS",S)+"\n"+fmt("DIA",D)+"\n"+fmt("PULSE",P);
 
  if(S.value!==null&&D.value!==null&&P.value!==null&&S.value>D.value){
-  $("status").textContent=`自動分割結果：${S.value}/${D.value}、脈拍 ${P.value}。写真と照合してください。`;
+  $("status").textContent=`HEM-7271T専用判定：${S.value}/${D.value}、脈拍 ${P.value}。写真と照合してください。`;
  }else{
-  $("status").textContent="自動分割または数字判定の信頼度が不足しています。ログを送ってください。";
+  $("status").textContent="一部の桁で信頼度が不足しています。ログを送ってください。";
  }
 };
 
