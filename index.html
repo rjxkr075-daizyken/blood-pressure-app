@@ -49,7 +49,7 @@ svg{width:100%;height:230px;display:block}
 <body>
 <div class="wrap">
 <h1>HEM-7271T 血圧フォト記録 v23</h1>
-<div class="sub">濃いLCDセグメント分離 + 形状判定（V23修正版）</div>
+<div class="sub">濃いLCDセグメント分離 + 形状判定（V23修正版2）</div>
 
 <div class="card">
  <div class="row">
@@ -561,6 +561,23 @@ function bandMean(arr,a,b){
  return n?s/n:0;
 }
 
+
+
+function regionDensity(mask,w,h,x1,y1,x2,y2){
+ let sum=0,n=0;
+ const X1=Math.max(0,Math.floor(x1*w));
+ const X2=Math.min(w,Math.ceil(x2*w));
+ const Y1=Math.max(0,Math.floor(y1*h));
+ const Y2=Math.min(h,Math.ceil(y2*h));
+
+ for(let y=Y1;y<Y2;y++){
+   for(let x=X1;x<X2;x++){
+     sum+=mask[y*w+x];
+     n++;
+   }
+ }
+ return n?sum/n:0;
+}
 
 function extractShapeFeatures(c){
  const prep=localContrastMask(c);

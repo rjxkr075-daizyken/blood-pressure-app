@@ -1,19 +1,17 @@
-# HEM-7271T 血圧フォト記録 V23 修正版
+# HEM-7271T 血圧フォト記録 V23 修正版2
 
-V23の認識方式は変更せず、解析が無反応・途中停止した場合でも原因が画面に出るよう修正した版です。
+V23修正版で発生していた解析エラーを修正しました。
 
-## 修正内容
-- 解析開始時にログ欄を必ず表示
-- SYS → DIA → PULSE の進行状況を逐次表示
-- 各段階の間で画面更新を挟む
-- 解析全体を try/catch で保護
-- JavaScript実行時エラーを赤い欄へ表示
-- Promiseエラーも表示
-- 正常終了時は必ず詳細ログを表示
-- service worker のキャッシュ名を変更し、古いV23が残る可能性を低減
+## 原因
+`extractShapeFeatures()` が使用する `regionDensity()` 関数が、
+V23の認識エンジン差し替え時に抜け落ちていました。
 
-「HEM-7271T専用解析」を押すと、
-解析開始 → SYS → DIA → PULSE → 完了
-または
-解析エラー + エラー内容
-のどちらかが必ず表示される設計です。
+そのため解析すると、
+extractShapeFeatures → classifyFixedDigit → analyzeFixedGroup
+の順で必ず停止していました。
+
+## 修正
+- `regionDensity()` を復旧
+- V23の濃いLCDセグメント分離・形状判定ロジック自体は変更なし
+- 進行状況・JavaScriptエラー表示も維持
+- Service Workerキャッシュ名を再変更
