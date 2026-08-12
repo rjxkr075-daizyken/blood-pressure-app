@@ -5,406 +5,283 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
 <link rel="manifest" href="manifest.webmanifest">
-<title>HEM-7271T 血圧フォト記録 v4</title>
+<title>HEM-7271T 血圧フォト記録 v5</title>
 <style>
 :root{--bg:#f5f6f8;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#111827;--danger:#b91c1c}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-.wrap{max-width:760px;margin:auto;padding:18px 14px 44px}
-h1{font-size:24px;margin:6px 0}.sub{color:var(--muted);font-size:14px;margin-bottom:16px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:15px;margin-bottom:13px}
+.wrap{max-width:780px;margin:auto;padding:18px 14px 44px}
+h1{font-size:24px;margin:6px 0}.sub,.status{color:var(--muted);font-size:14px;line-height:1.55}
+.card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:15px;margin-bottom:13px}
 button,.filebtn{display:inline-block;border:0;border-radius:12px;padding:12px 14px;font-size:15px;font-weight:700;background:var(--accent);color:#fff;cursor:pointer}
 .secondary{background:#e5e7eb;color:#111827}.danger{background:#fee2e2;color:var(--danger)}
-input[type=number],input[type=date],input[type=text],input[type=range]{width:100%}
-input[type=number],input[type=date],input[type=text]{padding:11px;border:1px solid var(--line);border-radius:11px;font-size:16px}
 input[type=file]{display:none}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+input[type=number],input[type=date],input[type=text]{width:100%;padding:11px;border:1px solid var(--line);border-radius:11px;font-size:16px}
 .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}.grow{flex:1}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
-.preview{width:100%;max-height:380px;object-fit:contain;background:#f9fafb;border:1px solid var(--line);border-radius:14px;display:block;margin-top:12px}
-.status{font-size:14px;color:var(--muted);padding:10px 0;line-height:1.55}
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.stat{padding:11px;background:#f9fafb;border:1px solid var(--line);border-radius:13px}
-.stat b{font-size:19px;display:block}.stat span{font-size:11px;color:var(--muted)}
-svg{width:100%;height:230px;display:block}
-table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1px solid var(--line);font-size:13px;text-align:left}
-th{color:var(--muted)}
+#stage,#rectStage{position:relative;margin-top:12px;touch-action:none;user-select:none}
+#photoCanvas,#rectified{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:14px;background:#eee}
+.handle{position:absolute;width:28px;height:28px;border-radius:50%;background:#111827;border:4px solid #fff;box-shadow:0 1px 6px #0005;transform:translate(-50%,-50%);touch-action:none}
+.guide{position:absolute;border:2px dashed #111827;pointer-events:none}
+.digitbox{position:absolute;border:2px solid #2563eb;background:#2563eb18;border-radius:8px;touch-action:none}
+.digitbox span{position:absolute;left:2px;top:2px;background:#2563eb;color:#fff;border-radius:5px;padding:2px 5px;font-size:10px;font-weight:700}
+.digitbox.selected{border-color:#dc2626;background:#dc262618}
 .notice{padding:10px 12px;border-radius:12px;background:#fff7ed;font-size:13px;line-height:1.5;margin-top:10px}
-.debug{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
-.debugbox{border:1px solid var(--line);border-radius:12px;padding:8px;background:#fafafa}
-.debugbox canvas{width:100%;height:110px;object-fit:contain;background:#ddd;border-radius:8px}
-.debugbox b{display:block;font-size:12px;margin-bottom:5px}
-.detect{font-size:20px;font-weight:800;padding-top:5px}
-.rangegrid{display:grid;grid-template-columns:1fr 80px;gap:8px;align-items:center;margin-top:10px}
-.badge{background:#eef2ff;padding:5px 8px;border-radius:999px;font-size:12px}
-@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}.debug{grid-template-columns:1fr}}
+.results{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.result{background:#f9fafb;border:1px solid var(--line);border-radius:13px;padding:10px;text-align:center}
+.result b{display:block;font-size:22px}.result span{font-size:11px;color:var(--muted)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{padding:11px;background:#f9fafb;border:1px solid var(--line);border-radius:13px}.stat b{font-size:19px;display:block}.stat span{font-size:11px;color:var(--muted)}
+svg{width:100%;height:230px;display:block}
+table{width:100%;border-collapse:collapse}th,td{padding:9px 5px;border-bottom:1px solid var(--line);font-size:13px;text-align:left}th{color:var(--muted)}
+.calib{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}.grid .datebox{grid-column:1/-1}.calib{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>HEM-7271T 血圧フォト記録 v4</h1>
-<div class="sub">7セグ液晶専用判定・局所コントラスト方式</div>
+<h1>HEM-7271T 血圧フォト記録 v5</h1>
+<div class="sub">4点補正 + 数字枠の手動微調整 + 校正保存</div>
 
 <div class="card">
-  <div class="row">
-    <label class="filebtn" for="photo">📷 血圧計を撮影 / 写真を選択</label>
-    <input id="photo" type="file" accept="image/*" capture="environment">
-    <button id="readBtn" class="secondary" disabled>7セグ読み取り</button>
-  </div>
+ <div class="row">
+  <label class="filebtn" for="photo">📷 撮影 / 写真を選択</label>
+  <input id="photo" type="file" accept="image/*" capture="environment">
+  <button id="rectifyBtn" class="secondary" disabled>液晶を補正</button>
+ </div>
 
-  <img id="preview" class="preview" style="display:none">
-
-  <div class="rangegrid">
-    <label>判定感度（誤って全部点灯する場合は＋方向）</label>
-    <span id="thresholdLabel" class="badge">0</span>
-    <input id="thresholdAdj" type="range" min="-30" max="30" value="0">
-    <span></span>
-  </div>
-
-  <div id="debug" class="debug" style="display:none">
-    <div class="debugbox"><b>上 SYS</b><canvas id="sysCanvas"></canvas><div id="sysDetect" class="detect">—</div></div>
-    <div class="debugbox"><b>下 DIA</b><canvas id="diaCanvas"></canvas><div id="diaDetect" class="detect">—</div></div>
-    <div class="debugbox"><b>脈拍 PULSE</b><canvas id="pulseCanvas"></canvas><div id="pulseDetect" class="detect">—</div></div>
-  </div>
-
-  <div id="status" class="status">本体を縦向き・真正面に近い角度で、写真いっぱいに写してください。</div>
-  <div class="notice">実験版です。自動入力後も必ず元写真と照合してから保存してください。</div>
+ <div id="stage" style="display:none">
+  <canvas id="photoCanvas"></canvas>
+  <div id="guide" class="guide"></div>
+  <div class="handle" data-i="0"></div>
+  <div class="handle" data-i="1"></div>
+  <div class="handle" data-i="2"></div>
+  <div class="handle" data-i="3"></div>
+ </div>
+ <div class="notice">まず4つの丸をLCD面の四隅へ合わせ、「液晶を補正」を押してください。</div>
 </div>
 
 <div class="card">
-  <div class="grid">
-    <div class="datebox"><label>日付</label><input id="date" type="date"></div>
-    <div><label>上（収縮期）mmHg</label><input id="sys" type="number" min="50" max="260"></div>
-    <div><label>下（拡張期）mmHg</label><input id="dia" type="number" min="30" max="180"></div>
-    <div><label>脈拍 /分</label><input id="pulse" type="number" min="30" max="220"></div>
-    <div><label>メモ</label><input id="memo" type="text" placeholder="朝・飲酒前など"></div>
-  </div>
-  <div style="height:12px"></div>
-  <button id="saveBtn">確認して保存</button>
+ <strong>数字枠の位置合わせ</strong>
+ <div class="sub">青い枠を各数字の上に重ねます。枠をドラッグして移動できます。赤枠が選択中です。</div>
+ <div id="rectStage" style="display:none">
+   <canvas id="rectified" width="900" height="700"></canvas>
+ </div>
+ <div class="calib">
+   <button id="readBtn" disabled>この枠で読み取る</button>
+   <button id="saveCalibBtn" class="secondary" disabled>枠位置を保存</button>
+   <button id="loadCalibBtn" class="secondary" disabled>保存位置を呼び出す</button>
+   <button id="resetBoxesBtn" class="secondary" disabled>枠を初期位置へ</button>
+ </div>
+ <div id="status" class="status" style="padding-top:10px">写真を選択してください。</div>
+
+ <div id="results" class="results" style="display:none">
+  <div class="result"><span>上 SYS</span><b id="rSys">—</b></div>
+  <div class="result"><span>下 DIA</span><b id="rDia">—</b></div>
+  <div class="result"><span>脈拍</span><b id="rPulse">—</b></div>
+ </div>
 </div>
 
 <div class="card">
-  <div class="stats">
-    <div class="stat"><b id="latest">—</b><span>最新 上/下</span></div>
-    <div class="stat"><b id="avg">—</b><span>平均 上/下</span></div>
-    <div class="stat"><b id="count">0</b><span>記録件数</span></div>
-  </div>
+ <div class="grid">
+  <div class="datebox"><label>日付</label><input id="date" type="date"></div>
+  <div><label>上 mmHg</label><input id="sys" type="number"></div>
+  <div><label>下 mmHg</label><input id="dia" type="number"></div>
+  <div><label>脈拍 /分</label><input id="pulse" type="number"></div>
+  <div><label>メモ</label><input id="memo" type="text" placeholder="朝・飲酒前など"></div>
+ </div>
+ <div style="height:12px"></div><button id="saveBtn">確認して保存</button>
+</div>
+
+<div class="card">
+ <div class="stats">
+  <div class="stat"><b id="latest">—</b><span>最新 上/下</span></div>
+  <div class="stat"><b id="avg">—</b><span>平均 上/下</span></div>
+  <div class="stat"><b id="count">0</b><span>記録件数</span></div>
+ </div>
 </div>
 
 <div class="card"><strong>血圧推移</strong><svg id="chart" viewBox="0 0 700 230" preserveAspectRatio="none"></svg></div>
-
-<div class="card">
-  <div class="row"><strong class="grow">履歴</strong><button id="csvBtn" class="secondary">CSV</button><button id="clearBtn" class="danger">全削除</button></div>
-  <div id="history"></div>
-</div>
+<div class="card"><div class="row"><strong class="grow">履歴</strong><button id="csvBtn" class="secondary">CSV</button><button id="clearBtn" class="danger">全削除</button></div><div id="history"></div></div>
 </div>
 
 <script>
-const KEY="bp_hem7271t_records_v4";
 const $=id=>document.getElementById(id);
+const KEY="bp_hem7271t_v5", CALKEY="bp_hem7271t_digitboxes_v5";
 $("date").value=new Date().toISOString().slice(0,10);
-let file=null, sourceImage=null;
 
-/*
-  Calibration from the supplied HEM-7271T photo.
-  Screen ROI is expressed as a fraction of the full photo.
-  Inside the normalized LCD, the three rows are fixed.
-*/
-const SCREEN={x:.285,y:.185,w:.525,h:.49};
+let src=null, pts=[], boxes=[];
+const pc=$("photoCanvas"),pctx=pc.getContext("2d",{willReadFrequently:true}),stage=$("stage");
+const handles=[...document.querySelectorAll(".handle")];
+const rc=$("rectified"),rctx=rc.getContext("2d",{willReadFrequently:true}),rectStage=$("rectStage");
 
-// digit boxes inside normalized 1000 x 1000 LCD
-const ROWS={
-  sys:{y:.23,h:.30, xs:[[.16,.30],[.30,.51],[.51,.70]]},
-  dia:{y:.49,h:.27, xs:[[.25,.43],[.43,.62]]},
-  pulse:{y:.73,h:.18,xs:[[.42,.56],[.56,.71]]}
+const DEFAULT_BOXES=[
+ {id:"s1",label:"SYS1",group:"sys",x:.27,y:.12,w:.14,h:.28},
+ {id:"s2",label:"SYS2",group:"sys",x:.41,y:.12,w:.14,h:.28},
+ {id:"s3",label:"SYS3",group:"sys",x:.55,y:.12,w:.14,h:.28},
+ {id:"d1",label:"DIA1",group:"dia",x:.39,y:.40,w:.14,h:.27},
+ {id:"d2",label:"DIA2",group:"dia",x:.53,y:.40,w:.14,h:.27},
+ {id:"p1",label:"P1",group:"pulse",x:.50,y:.69,w:.11,h:.18},
+ {id:"p2",label:"P2",group:"pulse",x:.61,y:.69,w:.11,h:.18}
+];
+
+const MAP={"1111110":0,"0110000":1,"1101101":2,"1111001":3,"0110011":4,"1011011":5,"1011111":6,"1110000":7,"1111111":8,"1111011":9};
+const SAMPLES=[[.5,.08],[.83,.27],[.83,.72],[.5,.92],[.17,.72],[.17,.27],[.5,.50]];
+
+function loadImage(f){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(f)})}
+
+$("photo").onchange=async e=>{
+ const f=e.target.files?.[0];if(!f)return;
+ src=await loadImage(f);
+ const maxW=1000,scale=Math.min(1,maxW/src.naturalWidth);
+ pc.width=Math.round(src.naturalWidth*scale);pc.height=Math.round(src.naturalHeight*scale);
+ pctx.drawImage(src,0,0,pc.width,pc.height);
+ stage.style.display="block";
+ pts=[{x:pc.width*.29,y:pc.height*.20},{x:pc.width*.79,y:pc.height*.20},{x:pc.width*.79,y:pc.height*.66},{x:pc.width*.29,y:pc.height*.66}];
+ positionHandles();$("rectifyBtn").disabled=false;
+ $("status").textContent="4つの丸をLCD面の四隅に合わせてください。";
 };
 
-const DIGIT_MAP={
-  "1111110":0, "0110000":1, "1101101":2, "1111001":3, "0110011":4,
-  "1011011":5, "1011111":6, "1110000":7, "1111111":8, "1111011":9
-};
-
-// segment sample rectangles inside a single digit box
-const SEG={
- a:[.23,.03,.77,.18],
- b:[.70,.12,.96,.47],
- c:[.70,.53,.96,.88],
- d:[.23,.82,.77,.98],
- e:[.04,.53,.30,.88],
- f:[.04,.12,.30,.47],
- g:[.23,.42,.77,.60]
-};
-const SEG_ORDER=["a","b","c","d","e","f","g"];
-
-$("thresholdAdj").addEventListener("input",()=>{
-  $("thresholdLabel").textContent=$("thresholdAdj").value;
+function positionHandles(){
+ const r=pc.getBoundingClientRect(),sx=r.width/pc.width,sy=r.height/pc.height;
+ handles.forEach((h,i)=>{h.style.left=(pts[i].x*sx)+"px";h.style.top=(pts[i].y*sy)+"px"});
+ const g=$("guide"),xs=pts.map(p=>p.x*sx),ys=pts.map(p=>p.y*sy);
+ g.style.left=Math.min(...xs)+"px";g.style.top=Math.min(...ys)+"px";
+ g.style.width=(Math.max(...xs)-Math.min(...xs))+"px";g.style.height=(Math.max(...ys)-Math.min(...ys))+"px";
+}
+window.addEventListener("resize",()=>{positionHandles();positionBoxes()});
+handles.forEach(h=>{
+ const i=Number(h.dataset.i);
+ h.onpointerdown=e=>{
+   e.preventDefault();h.setPointerCapture(e.pointerId);
+   h.onpointermove=ev=>{
+     const r=pc.getBoundingClientRect();
+     pts[i].x=Math.max(0,Math.min(pc.width,(ev.clientX-r.left)*pc.width/r.width));
+     pts[i].y=Math.max(0,Math.min(pc.height,(ev.clientY-r.top)*pc.height/r.height));
+     positionHandles();
+   };
+   h.onpointerup=()=>h.onpointermove=null;
+ };
 });
 
-$("photo").addEventListener("change",async e=>{
-  file=e.target.files?.[0]||null;
-  if(!file)return;
-  const url=URL.createObjectURL(file);
-  $("preview").src=url;
-  $("preview").style.display="block";
-  sourceImage=await loadImage(file);
-  $("readBtn").disabled=false;
-  $("status").textContent="写真を選択しました。「7セグ読み取り」を押してください。";
-});
+function rectify(){
+ const ow=rc.width,oh=rc.height,[tl,tr,br,bl]=pts;
+ const srcData=pctx.getImageData(0,0,pc.width,pc.height),dst=rctx.createImageData(ow,oh);
+ for(let y=0;y<oh;y++){
+   const v=y/(oh-1);
+   for(let x=0;x<ow;x++){
+     const u=x/(ow-1);
+     const sx=(1-u)*(1-v)*tl.x+u*(1-v)*tr.x+u*v*br.x+(1-u)*v*bl.x;
+     const sy=(1-u)*(1-v)*tl.y+u*(1-v)*tr.y+u*v*br.y+(1-u)*v*bl.y;
+     const ix=Math.max(0,Math.min(pc.width-1,Math.round(sx))),iy=Math.max(0,Math.min(pc.height-1,Math.round(sy)));
+     const si=(iy*pc.width+ix)*4,di=(y*ow+x)*4;
+     dst.data[di]=srcData.data[si];dst.data[di+1]=srcData.data[si+1];dst.data[di+2]=srcData.data[si+2];dst.data[di+3]=255;
+   }
+ }
+ rctx.putImageData(dst,0,0);
+ rectStage.style.display="block";
+ if(!boxes.length)boxes=structuredClone(DEFAULT_BOXES);
+ makeBoxes();positionBoxes();
+ ["readBtn","saveCalibBtn","loadCalibBtn","resetBoxesBtn"].forEach(id=>$(id).disabled=false);
+ $("status").textContent="青い枠を各数字に合わせてください。";
+}
 
-function loadImage(f){
- return new Promise((resolve,reject)=>{
-   const im=new Image();
-   im.onload=()=>resolve(im); im.onerror=reject;
-   im.src=URL.createObjectURL(f);
+$("rectifyBtn").onclick=rectify;
+
+function makeBoxes(){
+ [...rectStage.querySelectorAll(".digitbox")].forEach(x=>x.remove());
+ boxes.forEach((b,i)=>{
+   const d=document.createElement("div");d.className="digitbox";d.dataset.i=i;
+   const s=document.createElement("span");s.textContent=b.label;d.appendChild(s);rectStage.appendChild(d);
+   d.onpointerdown=e=>{
+     e.preventDefault();d.setPointerCapture(e.pointerId);
+     [...rectStage.querySelectorAll(".digitbox")].forEach(x=>x.classList.remove("selected"));
+     d.classList.add("selected");
+     const startX=e.clientX,startY=e.clientY,start={x:b.x,y:b.y};
+     d.onpointermove=ev=>{
+       const r=rc.getBoundingClientRect();
+       b.x=Math.max(0,Math.min(1-b.w,start.x+(ev.clientX-startX)/r.width));
+       b.y=Math.max(0,Math.min(1-b.h,start.y+(ev.clientY-startY)/r.height));
+       positionBoxes();
+     };
+     d.onpointerup=()=>d.onpointermove=null;
+   };
+ });
+}
+function positionBoxes(){
+ const r=rc.getBoundingClientRect();
+ [...rectStage.querySelectorAll(".digitbox")].forEach(d=>{
+   const b=boxes[Number(d.dataset.i)];
+   d.style.left=(b.x*r.width)+"px";d.style.top=(b.y*r.height)+"px";
+   d.style.width=(b.w*r.width)+"px";d.style.height=(b.h*r.height)+"px";
  });
 }
 
-function normalizeScreen(img){
-  const c=document.createElement("canvas");
-  c.width=1000;c.height=1000;
-  const ctx=c.getContext("2d",{willReadFrequently:true});
-  ctx.drawImage(
-    img,
-    img.naturalWidth*SCREEN.x,img.naturalHeight*SCREEN.y,
-    img.naturalWidth*SCREEN.w,img.naturalHeight*SCREEN.h,
-    0,0,1000,1000
-  );
-  return c;
+$("saveCalibBtn").onclick=()=>{localStorage.setItem(CALKEY,JSON.stringify(boxes));$("status").textContent="数字枠の位置を保存しました。"};
+$("loadCalibBtn").onclick=()=>{
+ try{const v=JSON.parse(localStorage.getItem(CALKEY)||"null");if(v){boxes=v;makeBoxes();positionBoxes();$("status").textContent="保存した数字枠を呼び出しました。"}else $("status").textContent="保存済みの枠位置はありません。"}catch{}
+};
+$("resetBoxesBtn").onclick=()=>{boxes=structuredClone(DEFAULT_BOXES);makeBoxes();positionBoxes();$("status").textContent="数字枠を初期位置に戻しました。"};
+
+function grayAt(x,y,r=5){
+ const sx=Math.max(0,Math.round(x-r)),sy=Math.max(0,Math.round(y-r)),sw=Math.min(rc.width-sx,2*r+1),sh=Math.min(rc.height-sy,2*r+1);
+ const d=rctx.getImageData(sx,sy,sw,sh).data;let s=0,n=0;
+ for(let i=0;i<d.length;i+=4){s+=.299*d[i]+.587*d[i+1]+.114*d[i+2];n++}
+ return s/n;
 }
 
-function cropRow(screen,row,outId){
-  const out=$(outId);
-  out.width=900;out.height=Math.round(900*row.h/.55);
-  const ctx=out.getContext("2d");
-  ctx.drawImage(screen,1000*.10,1000*row.y,1000*.62,1000*row.h,0,0,out.width,out.height);
-  return out;
+function recognizeDigit(b){
+ const ox=b.x*rc.width,oy=b.y*rc.height,bw=b.w*rc.width,bh=b.h*rc.height;
+ const vals=SAMPLES.map(([rx,ry],i)=>{
+   const px=ox+rx*bw,py=oy+ry*bh;
+   const seg=grayAt(px,py,Math.max(3,Math.round(Math.min(bw,bh)*.035)));
+   let bx=px,by=py;
+   if(i===0||i===3||i===6)by+=bh*.09;
+   else bx+=(i===1||i===2?-.13:.13)*bw;
+   const bg=grayAt(bx,by,Math.max(3,Math.round(Math.min(bw,bh)*.035)));
+   return bg-seg;
+ });
+ const bits=vals.map(v=>v>8?"1":"0").join("");
+ if(MAP[bits]!==undefined)return {n:MAP[bits],bits,vals};
+ let best={n:null,d:99};
+ for(const [pat,n] of Object.entries(MAP)){let d=0;for(let i=0;i<7;i++)if(pat[i]!==bits[i])d++;if(d<best.d)best={n:Number(n),d}}
+ return {n:best.d<=1?best.n:null,bits,vals};
 }
 
-function digitCanvas(screen,x1,x2,y,h){
-  const c=document.createElement("canvas");
-  c.width=180;c.height=300;
-  c.getContext("2d").drawImage(screen,
-    1000*x1,1000*y,1000*(x2-x1),1000*h,
-    0,0,c.width,c.height);
-  return c;
-}
-
-function grayscaleStats(canvas){
-  const ctx=canvas.getContext("2d",{willReadFrequently:true});
-  const d=ctx.getImageData(0,0,canvas.width,canvas.height).data;
-  let vals=[];
-  for(let i=0;i<d.length;i+=16){
-    vals.push(.299*d[i]+.587*d[i+1]+.114*d[i+2]);
-  }
-  vals.sort((a,b)=>a-b);
-  const q=p=>vals[Math.min(vals.length-1,Math.floor(vals.length*p))];
-  return {q20:q(.20),q50:q(.50),q80:q(.80)};
-}
-
-function meanGray(ctx,x,y,w,h){
-  const d=ctx.getImageData(x,y,w,h).data;
-  let sum=0,n=0;
-  for(let i=0;i<d.length;i+=16){
-    sum += .299*d[i]+.587*d[i+1]+.114*d[i+2];
-    n++;
-  }
-  return n ? sum/n : 255;
-}
-
-function segmentContrast(canvas,rect){
-  const ctx=canvas.getContext("2d",{willReadFrequently:true});
-  const [x1,y1,x2,y2]=rect;
-  const W=canvas.width,H=canvas.height;
-
-  const sx=Math.max(0,Math.floor(x1*W));
-  const sy=Math.max(0,Math.floor(y1*H));
-  const ex=Math.min(W,Math.ceil(x2*W));
-  const ey=Math.min(H,Math.ceil(y2*H));
-  const sw=Math.max(2,ex-sx), sh=Math.max(2,ey-sy);
-
-  // Inner core: likely segment pixels.
-  const mx=Math.max(1,Math.floor(sw*.20));
-  const my=Math.max(1,Math.floor(sh*.20));
-  const inner=meanGray(ctx,sx+mx,sy+my,Math.max(1,sw-2*mx),Math.max(1,sh-2*my));
-
-  // Local surrounding ring. This compensates for LCD background darkness,
-  // shadows, exposure and viewing angle.
-  const padX=Math.max(3,Math.floor(sw*.45));
-  const padY=Math.max(3,Math.floor(sh*.45));
-  const ox=Math.max(0,sx-padX), oy=Math.max(0,sy-padY);
-  const ow=Math.min(W-ox,sw+2*padX), oh=Math.min(H-oy,sh+2*padY);
-
-  const topH=Math.max(1,sy-oy);
-  const botY=ey;
-  const leftW=Math.max(1,sx-ox);
-  const rightX=ex;
-
-  let samples=[];
-  if(topH>0)samples.push(meanGray(ctx,ox,oy,ow,topH));
-  if(botY<oy+oh)samples.push(meanGray(ctx,ox,botY,ow,oy+oh-botY));
-  if(leftW>0)samples.push(meanGray(ctx,ox,sy,leftW,sh));
-  if(rightX<ox+ow)samples.push(meanGray(ctx,rightX,sy,ox+ow-rightX,sh));
-
-  const surround=samples.length?samples.reduce((a,b)=>a+b,0)/samples.length:255;
-
-  // Positive means the segment core is darker than its immediate background.
-  return {contrast:surround-inner,inner,surround};
-}
-function nearestDigit(bits,scores){
-  if(DIGIT_MAP[bits]!==undefined)return {digit:DIGIT_MAP[bits],distance:0};
-  let best={digit:null,distance:99};
-  for(const [pattern,digit] of Object.entries(DIGIT_MAP)){
-    let dist=0;
-    for(let i=0;i<7;i++){
-      if(pattern[i]!==bits[i])dist++;
-    }
-    if(dist<best.distance)best={digit,distance:dist};
-  }
-  // Accept only one missing/extra segment.
-  return best.distance<=1?best:{digit:null,distance:best.distance};
-}
-
-function detectDigit(canvas){
-  const adj=Number($("thresholdAdj").value);
-
-  const measures=SEG_ORDER.map(k=>segmentContrast(canvas,SEG[k]));
-  const contrasts=measures.map(m=>m.contrast);
-
-  // v4: no global grayscale threshold.
-  // A segment is ON only when it is measurably darker than its own surroundings.
-  // Slider now adjusts the required local contrast.
-  const requiredContrast=Math.max(3,12 + adj*.20);
-  const bits=contrasts.map(v=>v>requiredContrast?"1":"0").join("");
-
-  const n=nearestDigit(bits,contrasts);
-  return {
-    digit:n.digit,
-    bits,
-    scores:contrasts,
-    threshold:requiredContrast,
-    distance:n.distance,
-    measures
-  };
-}
-function readRow(screen,row){
-  let digits=[],debug=[];
-  for(const [x1,x2] of row.xs){
-    const c=digitCanvas(screen,x1,x2,row.y,row.h);
-    const r=detectDigit(c);
-    digits.push(r.digit);
-    debug.push(r);
-  }
-  if(digits.some(x=>x===null))return {value:null,digits,debug};
-  return {value:Number(digits.join("")),digits,debug};
-}
-
-function plausibility(sys,dia,pulse){
-  return {
-    sys:sys>=70&&sys<=250?sys:null,
-    dia:dia>=35&&dia<=150?dia:null,
-    pulse:pulse>=35&&pulse<=200?pulse:null
-  };
-}
-
-$("readBtn").addEventListener("click",()=>{
-  if(!sourceImage)return;
-  $("debug").style.display="grid";
-  $("status").textContent="7セグを解析中…";
-
-  try{
-    const screen=normalizeScreen(sourceImage);
-    cropRow(screen,ROWS.sys,"sysCanvas");
-    cropRow(screen,ROWS.dia,"diaCanvas");
-    cropRow(screen,ROWS.pulse,"pulseCanvas");
-
-    const rs=readRow(screen,ROWS.sys);
-    const rd=readRow(screen,ROWS.dia);
-    const rp=readRow(screen,ROWS.pulse);
-    const p=plausibility(rs.value,rd.value,rp.value);
-
-    $("sysDetect").textContent=rs.value??"?";
-    $("diaDetect").textContent=rd.value??"?";
-    $("pulseDetect").textContent=rp.value??"?";
-
-    if(p.sys)$("sys").value=p.sys;
-    if(p.dia)$("dia").value=p.dia;
-    if(p.pulse)$("pulse").value=p.pulse;
-
-    const fmt=r=>r.debug.map(x=>`${x.bits}[${x.scores.map(v=>v.toFixed(1)).join(",")}]`).join("/");
-    const dbg = [
-      `SYS bits:${fmt(rs)}`,
-      `DIA bits:${fmt(rd)}`,
-      `PULSE bits:${fmt(rp)}`
-    ].join("  ");
-
-    if(p.sys&&p.dia&&p.pulse){
-      $("status").textContent=`自動入力しました：${p.sys}/${p.dia} mmHg、脈拍 ${p.pulse}。写真と照合してください。 ${dbg}`;
-    }else{
-      $("status").textContent=`一部を判定できませんでした。全て1111111なら感度を＋方向、全て0000000なら－方向へ少し動かして再読み取りしてください。 ${dbg}`;
-    }
-  }catch(e){
-    console.error(e);
-    $("status").textContent="解析に失敗しました。血圧計を写真いっぱいに、縦向き・真正面で撮影してください。";
-  }
-});
+$("readBtn").onclick=()=>{
+ const rs=boxes.map(b=>({...recognizeDigit(b),group:b.group,label:b.label}));
+ const group=g=>rs.filter(r=>r.group===g);
+ const val=g=>{const a=group(g);return a.every(r=>r.n!==null)?Number(a.map(r=>r.n).join("")):null};
+ const sys=val("sys"),dia=val("dia"),pulse=val("pulse");
+ $("results").style.display="grid";$("rSys").textContent=sys??"?";$("rDia").textContent=dia??"?";$("rPulse").textContent=pulse??"?";
+ if(sys>=70&&sys<=250)$("sys").value=sys;if(dia>=35&&dia<=150)$("dia").value=dia;if(pulse>=35&&pulse<=200)$("pulse").value=pulse;
+ $("status").textContent=`SYS ${group("sys").map(r=>r.bits).join("/")} | DIA ${group("dia").map(r=>r.bits).join("/")} | PULSE ${group("pulse").map(r=>r.bits).join("/")}`;
+};
 
 function load(){try{return JSON.parse(localStorage.getItem(KEY)||"[]")}catch{return[]}}
 function persist(r){localStorage.setItem(KEY,JSON.stringify(r))}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-
-$("saveBtn").addEventListener("click",()=>{
+$("saveBtn").onclick=()=>{
  const sys=Number($("sys").value),dia=Number($("dia").value),pulse=Number($("pulse").value||0);
- if(!sys||!dia){alert("上と下の血圧を確認してください。");return}
- if(sys<=dia){alert("上の血圧は下の血圧より大きい値か確認してください。");return}
- if(!confirm(`保存しますか？\n${$("date").value}  ${sys}/${dia} mmHg${pulse?`  脈拍 ${pulse}`:""}`))return;
-
- const r=load();
- r.push({id:crypto.randomUUID?crypto.randomUUID():String(Date.now()),date:$("date").value,sys,dia,pulse:pulse||null,memo:$("memo").value.trim()});
- persist(r);
- $("sys").value=$("dia").value=$("pulse").value=$("memo").value="";
- render();
-});
-
+ if(!sys||!dia||sys<=dia){alert("血圧の数値を確認してください。");return}
+ if(!confirm(`${sys}/${dia} mmHg${pulse?` 脈拍 ${pulse}`:""} を保存しますか？`))return;
+ const r=load();r.push({id:crypto.randomUUID?crypto.randomUUID():String(Date.now()),date:$("date").value,sys,dia,pulse:pulse||null,memo:$("memo").value.trim()});persist(r);render();
+};
 window.delRec=id=>{persist(load().filter(r=>r.id!==id));render()};
-
 function render(){
- const r=load().sort((a,b)=>a.date.localeCompare(b.date));
- $("count").textContent=r.length;
- $("latest").textContent=r.length?`${r.at(-1).sys}/${r.at(-1).dia}`:"—";
- if(r.length){
-   const as=r.reduce((s,x)=>s+x.sys,0)/r.length;
-   const ad=r.reduce((s,x)=>s+x.dia,0)/r.length;
-   $("avg").textContent=`${as.toFixed(0)}/${ad.toFixed(0)}`;
- }else $("avg").textContent="—";
-
- $("history").innerHTML=r.length?`<table><thead><tr><th>日付</th><th>血圧</th><th>脈拍</th><th>メモ</th><th></th></tr></thead><tbody>${
-   [...r].reverse().map(x=>`<tr><td>${esc(x.date)}</td><td>${x.sys}/${x.dia}</td><td>${x.pulse??"—"}</td><td>${esc(x.memo)}</td><td><button class="danger" onclick="delRec('${x.id}')">削除</button></td></tr>`).join("")
- }</tbody></table>`:`<div class="status">まだ記録がありません。</div>`;
- draw(r);
+ const r=load().sort((a,b)=>a.date.localeCompare(b.date));$("count").textContent=r.length;$("latest").textContent=r.length?`${r.at(-1).sys}/${r.at(-1).dia}`:"—";
+ $("avg").textContent=r.length?`${(r.reduce((s,x)=>s+x.sys,0)/r.length).toFixed(0)}/${(r.reduce((s,x)=>s+x.dia,0)/r.length).toFixed(0)}`:"—";
+ $("history").innerHTML=r.length?`<table><thead><tr><th>日付</th><th>血圧</th><th>脈拍</th><th>メモ</th><th></th></tr></thead><tbody>${[...r].reverse().map(x=>`<tr><td>${esc(x.date)}</td><td>${x.sys}/${x.dia}</td><td>${x.pulse??"—"}</td><td>${esc(x.memo)}</td><td><button class="danger" onclick="delRec('${x.id}')">削除</button></td></tr>`).join("")}</tbody></table>`:`<div class="status">まだ記録がありません。</div>`;draw(r)
 }
-
 function draw(r){
- const svg=$("chart"),W=700,H=230,p=30;
- if(!r.length){svg.innerHTML=`<text x="350" y="115" text-anchor="middle" fill="#9ca3af">記録するとグラフが表示されます</text>`;return}
- const vals=r.flatMap(x=>[x.sys,x.dia]);let min=Math.min(...vals)-10,max=Math.max(...vals)+10;
- const x=i=>p+(r.length===1?(W-2*p)/2:i*(W-2*p)/(r.length-1));
- const y=v=>H-p-(v-min)*(H-2*p)/(max-min);
- const pts=f=>r.map((a,i)=>`${x(i)},${y(a[f])}`).join(" ");
- let h=`<line x1="${p}" y1="${H-p}" x2="${W-p}" y2="${H-p}" stroke="#d1d5db"/><line x1="${p}" y1="${p}" x2="${p}" y2="${H-p}" stroke="#d1d5db"/>`;
- h+=`<polyline points="${pts("sys")}" fill="none" stroke="#111827" stroke-width="3"/><polyline points="${pts("dia")}" fill="none" stroke="#6b7280" stroke-width="3"/>`;
- r.forEach((a,i)=>{h+=`<circle cx="${x(i)}" cy="${y(a.sys)}" r="4" fill="#111827"/><circle cx="${x(i)}" cy="${y(a.dia)}" r="4" fill="#6b7280"/>`});
- svg.innerHTML=h;
+ const svg=$("chart"),W=700,H=230,p=30;if(!r.length){svg.innerHTML=`<text x="350" y="115" text-anchor="middle" fill="#9ca3af">記録するとグラフが表示されます</text>`;return}
+ const vals=r.flatMap(x=>[x.sys,x.dia]),min=Math.min(...vals)-10,max=Math.max(...vals)+10,x=i=>p+(r.length===1?(W-2*p)/2:i*(W-2*p)/(r.length-1)),y=v=>H-p-(v-min)*(H-2*p)/(max-min),pts=f=>r.map((a,i)=>`${x(i)},${y(a[f])}`).join(" ");
+ svg.innerHTML=`<polyline points="${pts("sys")}" fill="none" stroke="#111827" stroke-width="3"/><polyline points="${pts("dia")}" fill="none" stroke="#6b7280" stroke-width="3"/>`
 }
-
-$("clearBtn").addEventListener("click",()=>{if(confirm("全記録を削除しますか？")){localStorage.removeItem(KEY);render()}});
-$("csvBtn").addEventListener("click",()=>{
- const r=load().sort((a,b)=>a.date.localeCompare(b.date));
- const rows=[["date","systolic","diastolic","pulse","memo"],...r.map(x=>[x.date,x.sys,x.dia,x.pulse??"",x.memo||""])];
- const csv=rows.map(row=>row.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\n");
- const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv"}));a.download="blood_pressure_hem7271t.csv";a.click();
-});
+$("clearBtn").onclick=()=>{if(confirm("全記録を削除しますか？")){localStorage.removeItem(KEY);render()}};
+$("csvBtn").onclick=()=>{const r=load(),rows=[["date","systolic","diastolic","pulse","memo"],...r.map(x=>[x.date,x.sys,x.dia,x.pulse??"",x.memo||""])],csv=rows.map(row=>row.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\n"),a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv"}));a.download="blood_pressure.csv";a.click()};
 if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
 render();
 </script>
-</body>
-</html>
+</body></html>
